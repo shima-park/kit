@@ -1,0 +1,77 @@
+syntax = "proto3";
+package addservice;
+service ServiceClient {
+rpc Sum (SumRequest) returns (SumResponse) {}
+rpc Concat (ConcatRequest) returns (ConcatResponse) {}
+rpc Test (TestRequest) returns (Response) {}
+}
+service ServiceServer {
+rpc Sum (SumRequest) returns (SumResponse) {}
+rpc Concat (ConcatRequest) returns (ConcatResponse) {}
+rpc Test (TestRequest) returns (Response) {}
+}
+message ConcatRequest {
+string A = 1;
+string B = 2;
+}
+message ConcatResponse {
+int64 Code = 1;
+string Message = 2;
+string Data = 3;
+}
+message Foo {
+string Name = 1;
+int64 Age = 2;
+float F32 = 3;
+double F64 = 4;
+uint32 UI32 = 5;
+uint64 UI64 = 6;
+bool B = 7;
+int64 StarInt = 8;
+Foo StarFoo = 9;
+Foo2 StarFoo2 = 10;
+bytes Bytes = 11;
+repeated string Strs = 12;
+repeated int64 Ints = 13;
+repeated int64 Int64S = 14;
+repeated float F32S = 15;
+repeated double F64S = 16;
+repeated Foo Foos = 17;
+repeated Foo StarFoos = 18;
+repeated Foo2 Foos2 = 19;
+repeated Foo2 StarFoos2 = 20;
+map<string, int64> MS2I = 21;
+map<string, int32> MS2I32 = 22;
+map<string, int64> MS2I64 = 23;
+map<string, uint32> MS2UI32 = 24;
+map<string, uint64> MS2UI64 = 25;
+map<int64, int64> MI2I = 26;
+map<string, Foo> MS2ST = 27;
+map<string, Foo2> MS2ST2 = 28;
+map<string, Foo> MS2StarST = 29;
+map<string, Foo2> MS2StarST2 = 30;
+}
+message Foo2 {
+string A = 1;
+int64 B = 2;
+}
+message Response {
+int64 Code = 1;
+string Message = 2;
+}
+message SumRequest {
+int64 A = 1;
+int64 B = 2;
+Foo2 F = 3;
+int32 Cc = 4;
+}
+message SumResponse {
+int64 Code = 1;
+string Message = 2;
+int64 Data = 3;
+}
+message TestRequest {
+string A = 1;
+int64 B = 2;
+Foo F = 3;
+}
