@@ -4,7 +4,7 @@ type Normalizer interface {
 	Normalize(name string) string
 }
 
-var NoopNormalizer = noopNormalizer{}
+var NoopNormalizer Normalizer = noopNormalizer{}
 
 type noopNormalizer struct {
 }

@@ -1,4 +1,4 @@
-package grpc
+package protobuf
 
 import (
 	"fmt"
@@ -11,14 +11,14 @@ import (
 	gen "ezrpro.com/micro/kit/pkg/generator"
 )
 
-type GRPCGenerator struct {
+type ProtobufGenerator struct {
 	cst           cst.ConcreteSyntaxTree
 	template      *template.Template
 	opts          Options
 	referenceType map[string]struct{} // key: [struct.Name or type.Name] val: struct{}{}
 }
 
-func NewGRPCGenerator(t cst.ConcreteSyntaxTree, opts ...Option) gen.Generator {
+func NewProtobufGenerator(t cst.ConcreteSyntaxTree, opts ...Option) gen.Generator {
 	var options Options
 	for _, opt := range opts {
 		opt(&options)
@@ -44,14 +44,14 @@ func NewGRPCGenerator(t cst.ConcreteSyntaxTree, opts ...Option) gen.Generator {
 		options.writer = gen.DefaultWriter
 	}
 
-	return &GRPCGenerator{
+	return &ProtobufGenerator{
 		cst:           t,
 		opts:          options,
 		referenceType: map[string]struct{}{},
 	}
 }
 
-func (g *GRPCGenerator) Generate() error {
+func (g *ProtobufGenerator) Generate() error {
 	w := NewSugerWriter(g.opts.writer)
 	w.P(`syntax = "proto3";`)
 	w.P(``)
@@ -78,12 +78,12 @@ func (g *GRPCGenerator) Generate() error {
 	return nil
 }
 
-func (g *GRPCGenerator) isUseStruct(structName string) bool {
+func (g *ProtobufGenerator) isUseStruct(structName string) bool {
 	_, found := g.referenceType[structName]
 	return found
 }
 
-func (g *GRPCGenerator) generateInterface(i cst.Interface) {
+func (g *ProtobufGenerator) generateInterface(i cst.Interface) {
 	w := NewSugerWriter(g.opts.writer)
 	serviceName := g.opts.serviceNameNormalizer.Normalize(i.Name)
 	w.P(`service %s {`, serviceName)
@@ -95,7 +95,7 @@ func (g *GRPCGenerator) generateInterface(i cst.Interface) {
 	w.P(``)
 }
 
-func (g *GRPCGenerator) generateServiceMethod(method cst.Method) {
+func (g *ProtobufGenerator) generateServiceMethod(method cst.Method) {
 	w := NewSugerWriter(g.opts.writer)
 	w.P(`rpc %s (`, method.Name)
 	g.generateServiceMethodFields(method.Params)
@@ -106,7 +106,7 @@ func (g *GRPCGenerator) generateServiceMethod(method cst.Method) {
 	w.P(``)
 }
 
-func (g *GRPCGenerator) generateServiceMethodFields(fields []cst.Field) {
+func (g *ProtobufGenerator) generateServiceMethodFields(fields []cst.Field) {
 	w := NewSugerWriter(g.opts.writer)
 	for _, field := range fields {
 		if g.opts.typeFilter(field.Type) {
@@ -130,7 +130,7 @@ func (g *GRPCGenerator) generateServiceMethodFields(fields []cst.Field) {
 	}
 }
 
-func (g *GRPCGenerator) recursiveFieldType(t cst.Type) {
+func (g *ProtobufGenerator) recursiveFieldType(t cst.Type) {
 	// 如果当前类型是struct 递归出所有组合的struct
 	if t.GoType != cst.StructType {
 		return
@@ -154,7 +154,7 @@ func (g *GRPCGenerator) recursiveFieldType(t cst.Type) {
 	}
 }
 
-func (g *GRPCGenerator) generateMessage(strc *cst.Struct) {
+func (g *ProtobufGenerator) generateMessage(strc *cst.Struct) {
 	w := NewSugerWriter(g.opts.writer)
 	w.P(`message %s {`, strc.Name)
 	w.P(``)
@@ -202,10 +202,11 @@ func (g *GRPCGenerator) generateMessage(strc *cst.Struct) {
 	w.P(``)
 }
 
-func (g *GRPCGenerator) checkPBTag(strc *cst.Struct) {
+func (g *ProtobufGenerator) checkPBTag(strc *cst.Struct) {
 	var (
-		useTagSeq bool
-		seqMap    = map[int]cst.Field{} // key: seq value: field
+		useTagCount int
+		seqMap      = map[int]cst.Field{}    // key: seq value: field
+		nameMap     = map[string]cst.Field{} // key: name value: field
 	)
 	for _, field := range strc.Fields {
 		var (
@@ -218,14 +219,12 @@ func (g *GRPCGenerator) checkPBTag(strc *cst.Struct) {
 		// 在这里自定义新增了一个tag(pb)用作name,seq,type的重定义
 		// 设置seq必须所有字段设置，否则会出现seq不唯一的情况
 		if field.Tag != "" && pbTagStr != "" {
+			useTagCount++
+
 			pbTags := strings.Split(pbTagStr, ",")
 			for _, pbTag := range pbTags {
 				switch {
 				case strings.HasPrefix(pbTag, "seq="):
-					if !useTagSeq {
-						useTagSeq = true
-					}
-
 					seqStr := pbTag[strings.Index(pbTag, "=")+1:]
 					seq, err := strconv.Atoi(seqStr)
 					if err != nil {
@@ -237,25 +236,39 @@ func (g *GRPCGenerator) checkPBTag(strc *cst.Struct) {
 					if !found {
 						seqMap[seq] = field
 					} else {
-						panic(fmt.Sprintf("StructName:%s Field:%s and Field:%s have the same seq(%d)\n  Field:%s %s \n  Field:%s %s",
+						panic(fmt.Sprintf("StructName:%s Field:%s and Field:%s have the same tag:seq(%d)\n  Field:%s %s %s\n  Field:%s %s %s",
 							strc.Name, field.Name, field2.Name, seq,
-							field.Name, field.Pos,
-							field2.Name, field2.Pos,
+							field.Name, field.Pos, field.Tag,
+							field2.Name, field2.Pos, field2.Tag,
 						))
 					}
+
 				case strings.HasPrefix(pbTag, "type="):
 
+				case strings.HasPrefix(pbTag, "name="):
+					name := pbTag[strings.Index(pbTag, "=")+1:]
+					field2, found := nameMap[name]
+					if !found {
+						nameMap[name] = field
+					} else {
+						panic(fmt.Sprintf("StructName:%s Field:%s and Field:%s have the same tag:name(%s)\n  Field:%s %s %s\n  Field:%s %s %s",
+							strc.Name, field.Name, field2.Name, name,
+							field.Name, field.Pos, field.Tag,
+							field2.Name, field2.Pos, field2.Tag,
+						))
+					}
 				}
-			}
-		} else {
-			if useTagSeq {
-				panic(fmt.Sprintf("If you use the \"seq\" tag you must set for(StructName:%s) all fields\n %s", strc.Name, strc.Pos))
 			}
 		}
 	}
+
+	// 使用了pb这个tag但是并没有给所有的字段加上，这种情况没办法增加序列号或者检查命名冲突
+	if useTagCount > 0 && useTagCount != len(strc.Fields) {
+		panic(fmt.Sprintf("If you use the \"pb\" tag you must set for(StructName:%s) all fields\n %s", strc.Name, strc.Pos))
+	}
 }
 
-func (g *GRPCGenerator) getGrpcType(t cst.Type) (grpcType string, ignore bool) {
+func (g *ProtobufGenerator) getGrpcType(t cst.Type) (grpcType string, ignore bool) {
 	grpcType, found := g.GoType2GrpcType(t)
 	if !found {
 		pkg := g.cst.PackageName()
@@ -277,7 +290,7 @@ func (g *GRPCGenerator) getGrpcType(t cst.Type) (grpcType string, ignore bool) {
 	return grpcType, false
 }
 
-func (g *GRPCGenerator) findStructInASTStructMap(pkg, structName string) (string, bool) {
+func (g *ProtobufGenerator) findStructInASTStructMap(pkg, structName string) (string, bool) {
 	if strc, found := g.cst.StructMap()[pkg][structName]; found {
 		// 存储接口定义中使用过的结构类型，方便判断后面message中是否生成
 		_, found = g.referenceType[structName]
@@ -290,7 +303,7 @@ func (g *GRPCGenerator) findStructInASTStructMap(pkg, structName string) (string
 	return "", false
 }
 
-func (g *GRPCGenerator) GoType2GrpcType(t cst.Type) (grpcType string, found bool) {
+func (g *ProtobufGenerator) GoType2GrpcType(t cst.Type) (grpcType string, found bool) {
 	goType := strings.TrimSpace(t.Name)
 	switch t.GoType {
 	case cst.BasicType:

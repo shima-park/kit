@@ -1,20 +1,22 @@
-package endpoint
+package transport
 
 import (
 	"io/ioutil"
+	"path/filepath"
 	"strings"
 	"text/template"
 
 	"ezrpro.com/micro/kit/pkg/cst"
 	gen "ezrpro.com/micro/kit/pkg/generator"
+	"ezrpro.com/micro/kit/pkg/utils"
 )
 
-type EndpointGenerator struct {
+type TransportGenerator struct {
 	cst  cst.ConcreteSyntaxTree
 	opts Options
 }
 
-func NewEndpointGenerator(t cst.ConcreteSyntaxTree, opts ...Option) gen.Generator {
+func NewTransportGenerator(t cst.ConcreteSyntaxTree, opts ...Option) gen.Generator {
 	var options Options
 	for _, opt := range opts {
 		opt(&options)
@@ -32,23 +34,33 @@ func NewEndpointGenerator(t cst.ConcreteSyntaxTree, opts ...Option) gen.Generato
 		options.tplConfig = gen.NoopTemplateConifg
 	}
 
-	return &EndpointGenerator{
+	return &TransportGenerator{
 		cst:  t,
 		opts: options,
 	}
 }
 
-func (g *EndpointGenerator) Generate() error {
+func (g *TransportGenerator) Generate() error {
 	tplBody, err := ioutil.ReadAll(g.opts.tpl)
 	if err != nil {
 		return err
 	}
 
-	t := template.New("endpoint").Funcs(g.opts.tplConfig.Funcs())
+	pbGoPath := utils.GetProtobufFilePath(g.cst.PackageName())
+	pbGoFile := filepath.Join(pbGoPath, g.cst.PackageName()+".pb.go")
+	pbCST, err := cst.New(pbGoFile)
+	if err != nil {
+		return err
+	}
+
+	t := template.New("transport").Funcs(g.opts.tplConfig.Funcs())
 	t, err = t.Parse(string(tplBody))
 	if err != nil {
 		return err
 	}
 
-	return t.Execute(g.opts.writer, g.opts.tplConfig.Data())
+	data := g.opts.tplConfig.Data()
+	data["PBCST"] = gen.NewTemplateConfig(pbCST).Data()
+
+	return t.Execute(g.opts.writer, data)
 }

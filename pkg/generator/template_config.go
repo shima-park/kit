@@ -1,18 +1,19 @@
 package generator
 
 import (
-	"html/template"
 	"strings"
+	"text/template"
 
 	"ezrpro.com/micro/kit/pkg/cst"
+	"ezrpro.com/micro/kit/pkg/utils"
 )
 
 type TemplateConfig interface {
 	Funcs() template.FuncMap
-	Data() interface{}
+	Data() map[string]interface{}
 }
 
-var NoopTemplateConifg = noopTemplateConifg{}
+var NoopTemplateConifg TemplateConfig = noopTemplateConifg{}
 
 type noopTemplateConifg struct {
 }
@@ -20,7 +21,7 @@ type noopTemplateConifg struct {
 func (n noopTemplateConifg) Funcs() template.FuncMap {
 	return map[string]interface{}{}
 }
-func (n noopTemplateConifg) Data() interface{} {
+func (n noopTemplateConifg) Data() map[string]interface{} {
 	return map[string]interface{}{}
 }
 
@@ -55,8 +56,9 @@ func (tc *templateConfig) build() {
 }
 
 type ReqAndResp struct {
-	Request  *cst.Struct
-	Response *cst.Struct
+	MethodName string
+	Request    *cst.Struct
+	Response   *cst.Struct
 }
 
 func (tc *templateConfig) buildInterfaceInfo() {
@@ -96,7 +98,9 @@ func (tc *templateConfig) buildRequestAndResponseInfo() {
 		tc.implMethods = append(tc.implMethods, method)
 
 		var (
-			rar            ReqAndResp
+			rar = ReqAndResp{
+				MethodName: method.Name,
+			}
 			foundReqOrResp bool
 		)
 		for _, param := range method.Params {
@@ -132,10 +136,14 @@ func (tc *templateConfig) buildRequestAndResponseInfo() {
 	}
 }
 
-func (tc *templateConfig) Data() interface{} {
+func (tc *templateConfig) Data() map[string]interface{} {
 	return map[string]interface{}{
 		"PackageName":           tc.cst.PackageName(),
-		"ImportPath":            "",
+		"ServiceName":           utils.ToCamelCase(tc.cst.PackageName()),
+		"ServiceImportPath":     utils.GetServiceImportPath(tc.cst.PackageName()),
+		"ProtobufImportPath":    utils.GetProtobufImportPath(tc.cst.PackageName()),
+		"EndpointImportPath":    utils.GetEndpointImportPath(tc.cst.PackageName()),
+		"TransportImportPath":   utils.GetTransportImportPath(tc.cst.PackageName()),
 		"InterfaceName":         tc.ifaceName,
 		"InterfaceMethods":      tc.ifaceMethods,
 		"Implementation":        tc.implStruct,
@@ -148,10 +156,10 @@ func (tc *templateConfig) Data() interface{} {
 
 func (d *templateConfig) Funcs() template.FuncMap {
 	return map[string]interface{}{
-		"ToCamelCase":              ToCamelCase,
-		"ToLowerFirstCamelCase":    ToLowerFirstCamelCase,
-		"ToLowerSnakeCase":         ToLowerSnakeCase,
-		"ToUpperFirst":             ToUpperFirst,
+		"ToCamelCase":              utils.ToCamelCase,
+		"ToLowerFirstCamelCase":    utils.ToLowerFirstCamelCase,
+		"ToLowerSnakeCase":         utils.ToLowerSnakeCase,
+		"ToUpperFirst":             utils.ToUpperFirst,
 		"JoinFieldsByComma":        cst.NewFieldsToString(","),
 		"JoinFieldsByLineBreak":    cst.NewFieldsToString("\n"),
 		"JoinFieldKeysByComma":     cst.NewFieldsKeyToString(","),

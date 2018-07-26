@@ -4,6 +4,8 @@ type Generator interface {
 	Generate() error
 }
 
+var NoopGenerator Generator = noopGenerator{}
+
 type noopGenerator struct {
 }
 

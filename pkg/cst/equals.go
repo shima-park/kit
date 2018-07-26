@@ -1,12 +1,9 @@
 package cst
 
-import "fmt"
-
 func IsInterfaceImplementation(iface Interface, strc *Struct) bool {
 	for _, ifaceMethod := range iface.Methods {
 		var equal bool
 		for _, strcMethod := range strc.Methods {
-			fmt.Println("--------", iface.Name, strc.Name, ifaceMethod.Name, strcMethod.Name, EqualMethod(ifaceMethod, strcMethod))
 			if EqualMethod(ifaceMethod, strcMethod) {
 				equal = true
 				break
@@ -26,8 +23,6 @@ func EqualMethod(expect, actual Method) bool {
 
 	for _, expectParam := range expect.Params {
 		var equal bool
-		fmt.Println("-----", expect.Name, expect.Params)
-		fmt.Println("-----", actual.Name, actual.Params)
 		for _, actualParam := range actual.Params {
 			if EqualMethodField(expectParam, actualParam) {
 				equal = true

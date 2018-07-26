@@ -201,7 +201,7 @@ func (t *concreteSyntaxTree) parseConst(specs []ast.Spec) {
 					v.Value = bt.String()
 				}
 			}
-			fmt.Println(v)
+
 			t.consts = append(t.consts, v)
 		}
 	}
@@ -608,7 +608,6 @@ func (t *concreteSyntaxTree) copyStructMap(t2 *concreteSyntaxTree) *concreteSynt
 	if t.structMap[t2.packageName] == nil {
 		t.structMap[t2.packageName] = t2.structMap[t2.packageName]
 	}
-	fmt.Println("----merge-----", t.structMap[t2.packageName])
 
 	// 合并解析过的包集合
 	//for key, val := range t2.parsedReferencePackageMap {

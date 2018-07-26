@@ -2,6 +2,8 @@ package cst
 
 import (
 	"bytes"
+	"go/parser"
+	"go/token"
 )
 
 type ConcreteSyntaxTree interface {
@@ -39,6 +41,24 @@ type Field struct {
 	Name string
 	Type Type
 	Tag  string
+}
+
+func New(filename string) (ConcreteSyntaxTree, error) {
+	fset := token.NewFileSet()
+
+	f, err := parser.ParseFile(fset, filename, nil, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	t := NewConcreteSyntaxTree(
+		fset,
+		f,
+	)
+	if err := t.Parse(); err != nil {
+		return nil, err
+	}
+	return t, nil
 }
 
 func FieldsToString(fields []Field) string {
