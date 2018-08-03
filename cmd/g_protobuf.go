@@ -4,7 +4,9 @@ import (
 	"path/filepath"
 
 	"ezrpro.com/micro/kit/pkg/cst"
+	"ezrpro.com/micro/kit/pkg/generator"
 	"ezrpro.com/micro/kit/pkg/generator/protobuf"
+	"ezrpro.com/micro/kit/pkg/generator/service"
 	"ezrpro.com/micro/kit/pkg/utils"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -27,8 +29,8 @@ var grpcCmd = &cobra.Command{
 			logrus.Error(err)
 			return
 		}
-
-		err = generateProtobuf(cst)
+		serviceSuffix := utils.SelectServiceSuffix(sourceFile)
+		err = generateProtobuf(cst, serviceSuffix)
 		if err != nil {
 			logrus.Error(err)
 			return
@@ -36,9 +38,9 @@ var grpcCmd = &cobra.Command{
 	},
 }
 
-func generateProtobuf(cst cst.ConcreteSyntaxTree) error {
-	protoPath := utils.GetProtobufFilePath(cst.PackageName())
-
+func generateProtobuf(cst cst.ConcreteSyntaxTree, serviceSuffix string) error {
+	baseServiceName := service.GetBaseServiceName(cst.PackageName(), serviceSuffix)
+	protoPath := utils.GetProtobufFilePath(baseServiceName)
 	filename := filepath.Join(protoPath, cst.PackageName()+".proto")
 
 	file, err := createFile(filename)
@@ -50,6 +52,11 @@ func generateProtobuf(cst cst.ConcreteSyntaxTree) error {
 	gen := protobuf.NewProtobufGenerator(
 		cst,
 		protobuf.WithWriter(file),
+		protobuf.WithServiceNameNormalizer(
+			ServiceNameNormalizer{serviceSuffix: serviceSuffix},
+		),
+		protobuf.WithStructFilter(generator.DefaultStructFilter),
+		protobuf.WithServiceSuffix(serviceSuffix),
 	)
 
 	err = gen.Generate()
@@ -62,6 +69,17 @@ func generateProtobuf(cst cst.ConcreteSyntaxTree) error {
 		return err
 	}
 	return nil
+}
+
+type ServiceNameNormalizer struct {
+	serviceSuffix string
+}
+
+func (n ServiceNameNormalizer) Normalize(name string) string {
+	if n.serviceSuffix == "" {
+		n.serviceSuffix = utils.GetServiceSuffix()
+	}
+	return utils.ToCamelCase(service.GetBaseServiceName(name, n.serviceSuffix))
 }
 
 func init() {

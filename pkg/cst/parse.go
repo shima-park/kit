@@ -333,10 +333,12 @@ func (t *concreteSyntaxTree) parseTypeSpec(specs []ast.Spec) {
 				t.parseInterface(tt, typeName)
 			case *ast.StructType:
 				t.addStruct(t.packageName, &Struct{
-					Pos:    t.fset.Position(typeSpec.Name.NamePos).Filename,
-					Name:   typeName,
-					Fields: t.parseFields(tt.Fields, typeName),
+					Position: t.fset.Position(typeSpec.Name.NamePos),
+					Name:     typeName,
+					Fields:   t.parseFields(tt.Fields, typeName),
 				})
+			case *ast.FuncType:
+				t.parseFuncType(tt)
 			default:
 				panic(fmt.Sprintf("Unknown TypeSpec(%T) analysis", tt))
 			}
@@ -379,6 +381,13 @@ func (t *concreteSyntaxTree) parseInterface(it *ast.InterfaceType, iterName stri
 	t.interfaces = append(t.interfaces, iter)
 }
 
+func (t *concreteSyntaxTree) parseFuncType(ft *ast.FuncType) {
+	t.methods = append(t.methods, Method{
+		Params:  t.parseFields(ft.Params, ""),
+		Results: t.parseFields(ft.Results, ""),
+	})
+}
+
 func (t *concreteSyntaxTree) parseFields(fieldList *ast.FieldList, structName string) []Field {
 	var fields []Field
 	if fieldList == nil {
@@ -417,9 +426,12 @@ func (t *concreteSyntaxTree) parseFields(fieldList *ast.FieldList, structName st
 
 func (t *concreteSyntaxTree) getFieldType(expr ast.Expr, structName string) Type {
 	var typ Type
+	typ.Position = t.fset.Position(expr.Pos())
 	switch ex := expr.(type) {
 	case *ast.Ident:
-		typ = t.getFieldTypeByIdent(ex, t.packageName, structName)
+		ident := t.getFieldTypeByIdent(ex, t.packageName, structName)
+		typ.Name = ident.Name
+		typ.GoType = ident.GoType
 	case *ast.BasicLit:
 		switch ex.Kind {
 		case token.INT:
@@ -469,11 +481,14 @@ func (t *concreteSyntaxTree) getFieldType(expr ast.Expr, structName string) Type
 		typ.X = st.X
 		typ.Name = "[]" + st.String()
 		typ.GoType = ArrayType
+		typ.ElementType = st.BaseType
 	case *ast.MapType:
 		keyType := t.getFieldType(ex.Key, structName)
 		valType := t.getFieldType(ex.Value, structName)
 		typ.Name = fmt.Sprintf("map[%s]%s", keyType.String(), valType.String())
 		typ.GoType = MapType
+		typ.KeyType = keyType.BaseType
+		typ.ValueType = valType.BaseType
 	case *ast.StructType:
 		// XXX_NoUnkeyedLiteral struct{} `json:"-"`
 		//fmt.Println("----", ex, t.fset.Position(ex.Pos()))
@@ -495,7 +510,7 @@ func (t *concreteSyntaxTree) getFieldType(expr ast.Expr, structName string) Type
 func (t *concreteSyntaxTree) getFieldTypeByIdent(ident *ast.Ident, pkg, structName string) Type {
 	var typ Type
 	typ.Name = ident.Name
-	if isBasicType(typ.Name) {
+	if IsBasicType(typ.Name) {
 		typ.GoType = BasicType
 	} else {
 		typ.GoType = StructType
@@ -507,7 +522,7 @@ func (t *concreteSyntaxTree) getFieldTypeByIdent(ident *ast.Ident, pkg, structNa
 	return typ
 }
 
-func isBasicType(typeName string) bool {
+func IsBasicType(typeName string) bool {
 	if obj := types.Universe.Lookup(typeName); obj != nil {
 		return true
 	}
@@ -522,12 +537,12 @@ func (t *concreteSyntaxTree) parseStruct(id *ast.Ident, X string) {
 
 	s := &Struct{
 		Name:        id.Name,
-		Pos:         t.fset.Position(id.NamePos).Filename,
+		Position:    t.fset.Position(id.NamePos),
 		PackageName: pkg,
 	}
 
 	if id.Obj != nil && id.Obj.Decl != nil {
-		s.Pos = t.fset.Position(id.Obj.Pos()).Filename
+		s.Position = t.fset.Position(id.Obj.Pos())
 		if typeSpec, ok := id.Obj.Decl.(*ast.TypeSpec); ok {
 			if structType, ok := typeSpec.Type.(*ast.StructType); ok {
 				s.Fields = t.parseFields(structType.Fields, id.Name)

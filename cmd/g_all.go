@@ -2,12 +2,13 @@ package cmd
 
 import (
 	"ezrpro.com/micro/kit/pkg/cst"
+	"ezrpro.com/micro/kit/pkg/utils"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-type GenerateFunc func(cst cst.ConcreteSyntaxTree) error
+type GenerateFunc func(cst cst.ConcreteSyntaxTree, serviceSuffix string) error
 
 var allCmd = &cobra.Command{
 	Use:     "all",
@@ -26,16 +27,18 @@ var allCmd = &cobra.Command{
 			return
 		}
 
+		serviceSuffix := utils.SelectServiceSuffix(sourceFile)
 		genFuncs := []GenerateFunc{
 			generateProtobuf,
 			generateEndpoint,
+			generateTransport,
+			generateServer,
+			generateClient,
 		}
-		genFuncs = append(genFuncs, generateTransportFuncs(AllTransportTypes...)...)
 
 		for _, genFunc := range genFuncs {
-			if err = genFunc(cst); err != nil {
-				logrus.Error(err)
-				return
+			if err = genFunc(cst, serviceSuffix); err != nil {
+				logrus.Fatal(err)
 			}
 		}
 

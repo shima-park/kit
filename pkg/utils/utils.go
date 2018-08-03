@@ -14,10 +14,16 @@ import (
 )
 
 func SetDefaults() {
-	viper.SetDefault("gk_service_path_format", "{{.Path}}/pkg/service/{{.ServiceName}}")
-	viper.SetDefault("gk_protobuf_path_format", "{{.Path}}/pkg/pb/{{.ServiceName}}")
-	viper.SetDefault("gk_endpoint_path_format", "{{.Path}}/pkg/endpoint/{{.ServiceName}}")
-	viper.SetDefault("gk_transport_path_format", "{{.Path}}/pkg/transport/{{.ServiceName}}")
+	viper.SetDefault("gk_service_path_format", "{{.Path}}/pkg/{{.ServiceName}}service")
+	viper.SetDefault("gk_protobuf_path_format", "{{.Path}}/pkg/{{.ServiceName}}pb")
+	viper.SetDefault("gk_endpoint_path_format", "{{.Path}}/pkg/{{.ServiceName}}endpoint")
+	viper.SetDefault("gk_transport_path_format", "{{.Path}}/pkg/{{.ServiceName}}transport")
+	viper.SetDefault("gk_server_path_format", "{{.Path}}/pkg/{{.ServiceName}}server")
+	viper.SetDefault("gk_client_path_format", "{{.Path}}/pkg/{{.ServiceName}}client")
+	viper.SetDefault("gk_service_suffix", "Service")
+	viper.SetDefault("gk_protobuf_service_suffix", "Server")
+	viper.SetDefault("gk_request_suffix", "Request")
+	viper.SetDefault("gk_response_suffix", "Response")
 }
 
 func GetFileNameWithoutExt(filename string) string {
@@ -53,6 +59,10 @@ func ToLowerSnakeCase(s string) string {
 
 func ToCamelCase(s string) string {
 	return godash.ToCamelCase(s)
+}
+
+func GetGoSrc() string {
+	return filepath.Join(GetGOPATH(), "src")
 }
 
 func GetGOPATH() string {
@@ -133,6 +143,37 @@ func getTransportPath(path, serviceName string) string {
 	return getPath("gk_transport_path_format", path, serviceName)
 }
 
+func getServerPath(path, serviceName string) string {
+	return getPath("gk_server_path_format", path, serviceName)
+}
+
+func getClientPath(path, serviceName string) string {
+	return getPath("gk_client_path_format", path, serviceName)
+}
+
+func GetServiceSuffix() string {
+	return viper.GetString("gk_service_suffix")
+}
+
+func GetProtobufServiceSuffix() string {
+	return viper.GetString("gk_protobuf_service_suffix")
+}
+
+func SelectServiceSuffix(sourceFile string) string {
+	if strings.HasSuffix(sourceFile, "pb.go") {
+		return GetProtobufServiceSuffix()
+	}
+	return GetServiceSuffix()
+}
+
+func GetRequestSuffix() string {
+	return viper.GetString("gk_request_suffix")
+}
+
+func GetResponseSuffix() string {
+	return viper.GetString("gk_response_suffix")
+}
+
 func GetServiceImportPath(svc string) string {
 	return getServicePath(
 		strings.TrimLeft(GetImportPath(), string(filepath.Separator)),
@@ -157,6 +198,18 @@ func GetTransportImportPath(svc string) string {
 		svc)
 }
 
+func GetServerImportPath(svc string) string {
+	return getServerPath(
+		strings.TrimLeft(GetImportPath(), string(filepath.Separator)),
+		svc)
+}
+
+func GetClientImportPath(svc string) string {
+	return getClientPath(
+		strings.TrimLeft(GetImportPath(), string(filepath.Separator)),
+		svc)
+}
+
 func GetServiceFilePath(svc string) string {
 	return getServicePath(
 		GetPWD(),
@@ -177,6 +230,18 @@ func GetEndpointFilePath(svc string) string {
 
 func GetTransportFilePath(svc string) string {
 	return getTransportPath(
+		GetPWD(),
+		svc)
+}
+
+func GetServerFilePath(svc string) string {
+	return getServerPath(
+		GetPWD(),
+		svc)
+}
+
+func GetClientFilePath(svc string) string {
+	return getClientPath(
 		GetPWD(),
 		svc)
 }

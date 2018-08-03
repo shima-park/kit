@@ -4,10 +4,9 @@ import (
 	"io/ioutil"
 	"strings"
 
-	"text/template"
-
 	gen "ezrpro.com/micro/kit/pkg/generator"
 	"ezrpro.com/micro/kit/pkg/utils"
+	"github.com/alecthomas/template"
 )
 
 type ServiceGenerator struct {
@@ -15,17 +14,18 @@ type ServiceGenerator struct {
 }
 
 func NewServiceGenerator(opts ...Option) gen.Generator {
-	var options Options
-	for _, opt := range opts {
-		opt(&options)
+	options := newOptions(opts...)
+
+	if options.serviceName == "" {
+		options.serviceName = options.serviceSuffix
+	} else {
+		if !strings.HasSuffix(options.serviceName, options.serviceSuffix) {
+			options.serviceName = utils.ToCamelCase(options.serviceName + options.serviceSuffix)
+		}
 	}
 
-	if options.writer == nil {
-		options.writer = gen.DefaultWriter
-	}
-
-	if options.tpl == nil {
-		options.tpl = strings.NewReader(defaultTemplate)
+	for i, method := range options.methods {
+		options.methods[i] = utils.ToCamelCase(method)
 	}
 
 	return &ServiceGenerator{
@@ -34,27 +34,37 @@ func NewServiceGenerator(opts ...Option) gen.Generator {
 }
 
 func (g *ServiceGenerator) Generate() error {
-	tplBody, err := ioutil.ReadAll(g.opts.tpl)
-	if err != nil {
-		return err
-	}
+	for tplName, readWriter := range g.opts.readWriterMap {
 
-	t := template.New("service").Funcs(map[string]interface{}{
-		"ToCamelCase":           utils.ToCamelCase,
-		"ToLowerFirstCamelCase": utils.ToLowerFirstCamelCase,
-		"ToLowerSnakeCase":      utils.ToLowerSnakeCase,
-		"ToUpperFirst":          utils.ToUpperFirst,
-		"ToLower":               strings.ToLower,
-	})
-	t, err = t.Parse(string(tplBody))
-	if err != nil {
-		return err
-	}
+		tplBody, err := ioutil.ReadAll(readWriter.template)
+		if err != nil {
+			return err
+		}
 
-	var data = map[string]interface{}{
-		"ServiceName":      g.opts.serviceName,
-		"InterfaceMethods": g.opts.methods,
-	}
+		t := template.New(string(tplName))
+		t, err = t.Parse(string(tplBody))
+		if err != nil {
+			return err
+		}
 
-	return t.Execute(g.opts.writer, data)
+		packageName := strings.ToLower(g.opts.serviceName)
+
+		var data = map[string]interface{}{
+			"PackageName":      packageName,
+			"ServiceName":      g.opts.serviceName,
+			"InterfaceMethods": g.opts.methods,
+		}
+
+		err = t.Execute(readWriter.writer, data)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func GetBaseServiceName(packageName, serviceSuffix string) string {
+	packageName = strings.ToLower(packageName)
+	serviceSuffix = strings.ToLower(serviceSuffix)
+	return strings.TrimSuffix(packageName, serviceSuffix)
 }

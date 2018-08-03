@@ -1,79 +1,67 @@
 package transport
 
-var defaultTemplate = `
-{{$pkg := .PackageName}}
-{{$ifaceName := .InterfaceName}}
-package addtransport
+var DefaultGRPCTemplate = `
+{{$servicePackageName := BasePath .ServiceImportPath}}
+{{$endpointPackageName := BasePath .EndpointImportPath}}
+{{$protobufPackageName := BasePath .ProtobufImportPath}}
+{{$baseServiceName := .BaseServiceName}}
+{{$requestAndResponseList := .RequestAndResponseList}}
+{{$pbRequestAndResponseList := .ProtobufCST.RequestAndResponseList}}
+package {{.PackageName}}
 
 import (
 	"context"
 	"errors"
-	"time"
 
 	"google.golang.org/grpc"
 
-	stdopentracing "github.com/opentracing/opentracing-go"
-	stdzipkin "github.com/openzipkin/zipkin-go"
-	"github.com/sony/gobreaker"
-	oldcontext "golang.org/x/net/context"
-	"golang.org/x/time/rate"
-
-	"github.com/go-kit/kit/circuitbreaker"
-	"github.com/go-kit/kit/endpoint"
-	"github.com/go-kit/kit/log"
-	"github.com/go-kit/kit/ratelimit"
 	"github.com/go-kit/kit/tracing/opentracing"
-	"github.com/go-kit/kit/tracing/zipkin"
 	grpctransport "github.com/go-kit/kit/transport/grpc"
 
-        {{.PackageName}}service "{{.ServiceImportPath}}"
-        {{.PackageName}}endpoint "{{.EndpointImportPath}}"
-        pb "{{.ProtobufImportPath}}"
+	{{$servicePackageName}} "{{.ServiceImportPath}}"
+        {{$endpointPackageName}} "{{.EndpointImportPath}}"
+        {{$protobufPackageName}} "{{.ProtobufImportPath}}"
+        "ezrpro.com/micro/spiderconn"
 )
 
 type grpcServer struct {
-{{range $k, $method := .InterfaceMethods}}
-	{{ToLowerFirstCamelCase $method.Name}}    grpctransport.Handler
+{{range $index, $method := .ServiceMethods}}
+	{{ToLower $method.Name}} grpctransport.Handler
 {{end}}
 }
 
 // NewGRPCServer makes a set of endpoints available as a gRPC AddServer.
-func NewGRPCServer(endpoints addendpoint.Set, otTracer stdopentracing.Tracer, zipkinTracer *stdzipkin.Tracer, logger log.Logger) pb.AddServer {
-	// Zipkin GRPC Server Trace can either be instantiated per gRPC method with a
-	// provided operation name or a global tracing service can be instantiated
-	// without an operation name and fed to each Go kit gRPC server as a
-	// ServerOption.
-	// In the latter case, the operation name will be the endpoint's grpc method
-	// path if used in combination with the Go kit gRPC Interceptor.
-	//
-	// In this example, we demonstrate a global Zipkin tracing service with
-	// Go kit gRPC Interceptor.
-	zipkinServer := zipkin.GRPCServerTrace(zipkinTracer)
+func NewGRPCServer(opts ...Option) {{.ProtobufCST.PackageName}}.{{.ProtobufCST.ServiceName}} {
+	options := newOptions(opts...)
 
-	options := []grpctransport.ServerOption{
-		grpctransport.ServerErrorLogger(logger),
-		zipkinServer,
+	serverOptions := []grpctransport.ServerOption{
+		grpctransport.ServerErrorLogger(options.logger),
 	}
+	serverOptions = append(serverOptions, options.grpcServerOptions...)
 
 	return &grpcServer{
-{{range $k, $method := .InterfaceMethods}}
-{{ToLowerFirstCamelCase $method.Name}}: grpctransport.NewServer(
-			endpoints.{{$method.Name}}Endpoint,
+{{range $index, $method := .ServiceMethods}}
+		{{ToLower $method.Name}}: grpctransport.NewServer(
+			options.endpoints.{{$method.Name}}Endpoint.Do,
 			decodeGRPC{{$method.Name}}Request,
 			encodeGRPC{{$method.Name}}Response,
-			append(options, grpctransport.ServerBefore(opentracing.GRPCToContext(otTracer, "{{$method.Name}}", logger)))...,
+			append(
+				serverOptions,
+				grpctransport.ServerBefore(
+					opentracing.GRPCToContext(options.otTracer, options.endpoints.{{$method.Name}}Endpoint.Name(), options.logger),
+				),
+			)...,
 		),
 {{end}}
 	}
 }
-
-{{range $methodIndex, $method := .InterfaceMethods}}
-func (s *grpcServer) {{$method.Name}}(ctx context.Context, req *pb.{{$method.Name}}Request) (resp *pb.{{$method.Name}}Response, err error) {
-	_, rep, err := s.{{ToLowerFirstCamelCase $method.Name}}.ServeGRPC({{JoinFieldKeysByComma $method.Params}})
+{{range $index, $method := .ServiceMethods}}
+func (s *grpcServer) {{$method.Name}}(ctx context.Context, req *{{$protobufPackageName}}.{{$method.Name}}Request) (*{{$protobufPackageName}}.{{$method.Name}}Response, error) {
+	_, resp, err := s.sum.ServeGRPC(ctx, req)
 	if err != nil {
 		return nil, err
 	}
-	return rep.(*pb.{{$method.Name}}Response), nil
+	return resp.(*{{$protobufPackageName}}.{{$method.Name}}Response), nil
 }
 {{end}}
 
@@ -81,72 +69,51 @@ func (s *grpcServer) {{$method.Name}}(ctx context.Context, req *pb.{{$method.Nam
 // of the conn. The caller is responsible for constructing the conn, and
 // eventually closing the underlying transport. We bake-in certain middlewares,
 // implementing the client library pattern.
-func NewGRPCClient(conn *grpc.ClientConn, otTracer stdopentracing.Tracer, zipkinTracer *stdzipkin.Tracer, logger log.Logger) {{.PackageName}}service.{{ToCamelCase .PackageName}} {
-	// We construct a single ratelimiter middleware, to limit the total outgoing
-	// QPS from this client to all methods on the remote instance. We also
-	// construct per-endpoint circuitbreaker middlewares to demonstrate how
-	// that's done, although they could easily be combined into a single breaker
-	// for the entire remote instance, too.
-	limiter := ratelimit.NewErroringLimiter(rate.NewLimiter(rate.Every(time.Second), 100))
-
-	// Zipkin GRPC Client Trace can either be instantiated per gRPC method with a
-	// provided operation name or a global tracing client can be instantiated
-	// without an operation name and fed to each Go kit client as ClientOption.
-	// In the latter case, the operation name will be the endpoint's grpc method
-	// path.
-	//
-	// In this example, we demonstrace a global tracing client.
-	zipkinClient := zipkin.GRPCClientTrace(zipkinTracer)
-
-	// global client middlewares
-	options := []grpctransport.ClientOption{
-		zipkinClient,
-	}
+func NewGRPCClient(conn *grpc.ClientConn, opts ...ClientOption) {{$servicePackageName}}.{{.ServiceName}} {
+	options := newClientOption(opts...)
 
 	// Each individual endpoint is an grpc/transport.Client (which implements
 	// endpoint.Endpoint) that gets wrapped with various middlewares. If you
 	// made your own client library, you'd do this work there, so your server
 	// could rely on a consistent set of client behavior.
-{{range $k, $method := .InterfaceMethods}}
-	var {{ToLowerFirstCamelCase $method.Name}}Endpoint endpoint.Endpoint
+{{range $index, $method := .ServiceMethods}}
+	var {{ToLower $method.Name}}Wrapper spiderconn.EndpointWrapper
 	{
-		{{ToLowerFirstCamelCase $method.Name}}Endpoint = grpctransport.NewClient(
+		method := "{{$method.Name}}"
+		{{ToLower $method.Name}}Endpoint := grpctransport.NewClient(
 			conn,
-			"{{$pkg}}.{{$ifaceName}}",
-			"{{$method.Name}}",
+			"{{$protobufPackageName}}.{{ToCamelCase $baseServiceName}}",
+			method,
 			encodeGRPC{{$method.Name}}Request,
 			decodeGRPC{{$method.Name}}Response,
-			pb.{{$method.Name}}Response{},
-			append(options, grpctransport.ClientBefore(opentracing.ContextToGRPC(otTracer, logger)))...,
+			{{$protobufPackageName}}.{{$method.Name}}Response{},
+			append(options.clientOptions, grpctransport.ClientBefore(opentracing.ContextToGRPC(options.otTracer, options.logger)))...,
 		).Endpoint()
-		{{ToLowerFirstCamelCase $method.Name}}Endpoint = opentracing.TraceClient(otTracer, "{{$method.Name}}")({{ToLowerFirstCamelCase $method.Name}}Endpoint)
-		{{ToLowerFirstCamelCase $method.Name}}Endpoint = limiter({{ToLowerFirstCamelCase $method.Name}}Endpoint)
-		{{ToLowerFirstCamelCase $method.Name}}Endpoint = circuitbreaker.Gobreaker(gobreaker.NewCircuitBreaker(gobreaker.Settings{
-			Name:    "{{$method.Name}}",
-			Timeout: 30 * time.Second,
-		}))({{ToLowerFirstCamelCase $method.Name}}Endpoint)
+		for _, middlewareCreator := range options.middlewareCreators {
+			{{ToLower $method.Name}}Endpoint = middlewareCreator(method)({{ToLower $method.Name}}Endpoint)
+		}
+		{{ToLower $method.Name}}Wrapper = spiderconn.NewWrapper(method, {{ToLower $method.Name}}Endpoint)
 	}
 {{end}}
-
-	// Returning the endpoint.Set as a service.Service relies on the
-	// endpoint.Set implementing the Service methods. That's just a simple bit
+	// Returning the endpoint.Set as a {{$servicePackageName}}.{{.ServiceName}} relies on the
+	// endpoint.Set implementing the {{.ServiceName}} methods. That's just a simple bit
 	// of glue code.
 	return addendpoint.Set{
-{{range $methodIndex, $method := .InterfaceMethods}}
-		{{$method.Name}}Endpoint:    {{ToLowerFirstCamelCase $method.Name}}Endpoint,
+{{range $index, $method := .ServiceMethods}}
+		{{$method.Name}}Endpoint: {{ToLower $method.Name}}Wrapper,
 {{end}}
 	}
 }
 
-{{range .RequestsAndResponses}}
+{{range .RequestAndResponseList}}
 {{if .Request}}
 // decodeGRPC{{.Request.Name}} is a transport/grpc.DecodeRequestFunc that converts a
 // gRPC sum request to a user-domain sum request. Primarily useful in a server.
 func decodeGRPC{{.Request.Name}}(_ context.Context, grpcReq interface{}) (interface{}, error) {
-	req := grpcReq.(*pb.{{.Request.Name}})
-	return &addendpoint.{{.Request.Name}}{
-            {{range $fk, $fv := .Request.Fields}}{{$fv.Name}}: {{$fv.Type}}(req.{{$fv.Name}}),
-            {{end}}
+	req := grpcReq.(*{{$protobufPackageName}}.{{.Request.Name}})
+        {{if not .Request}}_ = req{{end}}
+	return &{{$servicePackageName}}.{{.Request.Name}}{
+            {{GenerateAssignmentSegment .Request $pbRequestAndResponseList "req"}}
         }, nil
 }
 {{end}}
@@ -155,27 +122,24 @@ func decodeGRPC{{.Request.Name}}(_ context.Context, grpcReq interface{}) (interf
 // decodeGRPC{{.Response.Name}} is a transport/grpc.DecodeResponseFunc that converts a
 // gRPC sum response to a user-domain sum response. Primarily useful in a client.
 func decodeGRPC{{.Response.Name}}(_ context.Context, grpcResponse interface{}) (interface{}, error) {
-	resp := grpcResponse.(*pb.{{.Response.Name}})
-	return &addendpoint.{{.Response.Name}}{
-            V:&{{$pkg}}service.{{.Response.Name}}{
-            {{range $fk, $fv := .Response.Fields}}{{$fv.Name}}: {{$fv.Type}}(resp.{{$fv.Name}}),
-            {{end}}
-        },
+	resp := grpcResponse.(*{{$protobufPackageName}}.{{.Response.Name}})
+	return &{{$servicePackageName}}.{{.Response.Name}}{
+            {{GenerateAssignmentSegment .Response $pbRequestAndResponseList "resp"}}
         }, nil
 }
 {{end}}
 {{end}}
 
 
-{{range .PBCST.RequestsAndResponses}}
+{{range .ProtobufCST.RequestAndResponseList}}
 {{if .Request}}
 // encodeGRPC{{.Request.Name}} is a transport/grpc.EncodeRequestFunc that converts a
 // user-domain sum request to a gRPC sum request. Primarily useful in a client.
 func encodeGRPC{{.Request.Name}}(_ context.Context, request interface{}) (interface{}, error) {
-	req := request.(*{{$pkg}}service.{{.Request.Name}})
-	return &pb.{{.Request.Name}}{
-            {{range $fk, $fv := .Request.Fields}}{{$fv.Name}}: {{$fv.Type}}(req.{{$fv.Name}}),
-            {{end}}
+	req := request.(*{{$servicePackageName}}.{{.Request.Name}})
+        {{if not .Request}}_ = req{{end}}
+	return &{{$protobufPackageName}}.{{.Request.Name}}{
+            {{GenerateAssignmentSegment .Request $requestAndResponseList "req"}}
         }, nil
 }
 {{end}}
@@ -184,31 +148,336 @@ func encodeGRPC{{.Request.Name}}(_ context.Context, request interface{}) (interf
 // encodeGRPC{{.Response.Name}} is a transport/grpc.EncodeResponseFunc that converts a
 // user-domain sum response to a gRPC sum response. Primarily useful in a server.
 func encodeGRPC{{.Response.Name}}(_ context.Context, response interface{}) (interface{}, error) {
-	resp := response.(*{{$pkg}}endpoint.{{.Response.Name}})
-	return &pb.{{.Response.Name}}{
-            {{range $fk, $fv := .Response.Fields}}{{$fv.Name}}: {{$fv.Type}}(resp.V.{{$fv.Name}}),
-            {{end}}
+	resp := response.(*{{$servicePackageName}}.{{.Response.Name}})
+	return &{{$protobufPackageName}}.{{.Response.Name}}{
+            {{GenerateAssignmentSegment .Response $requestAndResponseList "resp"}}
         }, nil
 }
 {{end}}
 
 {{end}}
+`
 
-// These annoying helper functions are required to translate Go error types to
-// and from strings, which is the type we use in our IDLs to represent errors.
-// There is special casing to treat empty strings as nil errors.
+var DefaultHTTPTemplate = `
+{{$servicePackageName := BasePath .ServiceImportPath}}
+{{$endpointPackageName := BasePath .EndpointImportPath}}
+package {{.PackageName}}
 
-func str2err(s string) error {
-	if s == "" {
-		return nil
-	}
-	return errors.New(s)
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io/ioutil"
+	"net/http"
+	"net/url"
+	"os"
+	"strings"
+
+	{{$servicePackageName}} "{{.ServiceImportPath}}"
+        {{$endpointPackageName}} "{{.EndpointImportPath}}"
+	"ezrpro.com/micro/spiderconn"
+	stdopentracing "github.com/opentracing/opentracing-go"
+
+	"github.com/go-kit/kit/endpoint"
+	"github.com/go-kit/kit/log"
+	"github.com/go-kit/kit/tracing/opentracing"
+	httptransport "github.com/go-kit/kit/transport/http"
+)
+
+// NewHTTPHandler returns an HTTP handler that makes a set of endpoints
+// available on predefined paths.
+func NewHTTPHandler(opts ...Option) http.Handler {
+	options := newOptions(opts...)
+
+	m := http.NewServeMux()
+{{range $index, $method := .ServiceMethods}}
+	m.Handle("/{{ToLower $method.Name}}", httptransport.NewServer(
+		options.endpoints.{{$method.Name}}Endpoint.Do,
+		decodeHTTP{{$method.Name}}Request,
+		encodeHTTPGenericResponse,
+		append(options.httpServerOptions, httptransport.ServerBefore(opentracing.HTTPToContext(options.otTracer, "{{$method.Name}}", options.logger)))...,
+	))
+{{end}}
+	return m
 }
 
-func err2str(err error) string {
-	if err == nil {
-		return ""
+// NewHTTPClient returns an AddService backed by an HTTP server living at the
+// remote instance. We expect instance to come from a service discovery system,
+// so likely of the form "host:port". We bake-in certain middlewares,
+// implementing the client library pattern.
+func NewHTTPClient(instance string, opts ...ClientOption) ({{$servicePackageName}}.{{.ServiceName}}, error) {
+	// Quickly sanitize the instance string.
+	if !strings.HasPrefix(instance, "http") {
+		instance = "http://" + instance
 	}
-	return err.Error()
+	u, err := url.Parse(instance)
+	if err != nil {
+		return nil, err
+	}
+
+	options := newClientOption(opts...)
+
+{{range $index, $method := .ServiceMethods}}
+	var {{ToLower $method.Name}}Wrapper spiderconn.EndpointWrapper
+	{
+		method := "{{$method.Name}}"
+		{{ToLower $method.Name}}Endpoint := httptransport.NewClient(
+			"POST",
+			copyURL(u, "/{{ToLower $method.Name}}"),
+			encodeHTTPGenericRequest,
+			decodeHTTP{{$method.Name}}Response,
+			append(options.httpClientOptions, httptransport.ClientBefore(opentracing.ContextToHTTP(options.otTracer, options.logger)))...,
+		).Endpoint()
+		for _, middlewareCreator := range options.middlewareCreators {
+			{{ToLower $method.Name}}Endpoint = middlewareCreator(method)({{ToLower $method.Name}}Endpoint)
+		}
+		{{ToLower $method.Name}}Wrapper = spiderconn.NewWrapper(method, {{ToLower $method.Name}}Endpoint)
+	}
+{{end}}
+	// Returning the endpoint.Set as a service.Service relies on the
+	// endpoint.Set implementing the Service methods. That's just a simple bit
+	// of glue code.
+	return addendpoint.Set{
+{{range $index, $method := .ServiceMethods}}
+		{{$method.Name}}Endpoint: {{ToLower $method.Name}}Wrapper,
+{{end}}
+	}, nil
+}
+
+func copyURL(base *url.URL, path string) *url.URL {
+	next := *base
+	next.Path = path
+	return &next
+}
+
+func errorEncoder(_ context.Context, err error, w http.ResponseWriter) {
+	w.WriteHeader(err2code(err))
+	json.NewEncoder(w).Encode(errorWrapper{Error: err.Error()})
+}
+
+func err2code(err error) int {
+	//switch err {
+	//case addservice.ErrTwoZeroes, addservice.ErrMaxSizeExceeded, addservice.ErrIntOverflow:
+	//	return http.StatusBadRequest
+	//}
+	// TODO
+	if err != nil {
+		return http.StatusInternalServerError
+	}
+	return http.StatusOK
+}
+
+func errorDecoder(r *http.Response) error {
+	var w errorWrapper
+	if err := json.NewDecoder(r.Body).Decode(&w); err != nil {
+		return err
+	}
+	return errors.New(w.Error)
+}
+
+type errorWrapper struct {
+	Error string ` + "`json:\"error\"`" + `
+}
+
+// decodeHTTPSumRequest is a transport/http.DecodeRequestFunc that decodes a
+// JSON-encoded sum request from the HTTP request body. Primarily useful in a
+// server.
+func decodeHTTPSumRequest(_ context.Context, r *http.Request) (interface{}, error) {
+	var req addservice.SumRequest
+	err := json.NewDecoder(r.Body).Decode(&req)
+	return req, err
+}
+
+// decodeHTTPConcatRequest is a transport/http.DecodeRequestFunc that decodes a
+// JSON-encoded concat request from the HTTP request body. Primarily useful in a
+// server.
+func decodeHTTPConcatRequest(_ context.Context, r *http.Request) (interface{}, error) {
+	var req addservice.ConcatRequest
+	err := json.NewDecoder(r.Body).Decode(&req)
+	return req, err
+}
+
+// decodeHTTPSumResponse is a transport/http.DecodeResponseFunc that decodes a
+// JSON-encoded sum response from the HTTP response body. If the response has a
+// non-200 status code, we will interpret that as an error and attempt to decode
+// the specific error message from the response body. Primarily useful in a
+// client.
+func decodeHTTPSumResponse(_ context.Context, r *http.Response) (interface{}, error) {
+	if r.StatusCode != http.StatusOK {
+		return nil, errors.New(r.Status)
+	}
+	var resp addservice.SumResponse
+	err := json.NewDecoder(r.Body).Decode(&resp)
+	return resp, err
+}
+
+// decodeHTTPConcatResponse is a transport/http.DecodeResponseFunc that decodes
+// a JSON-encoded concat response from the HTTP response body. If the response
+// has a non-200 status code, we will interpret that as an error and attempt to
+// decode the specific error message from the response body. Primarily useful in
+// a client.
+func decodeHTTPConcatResponse(_ context.Context, r *http.Response) (interface{}, error) {
+	if r.StatusCode != http.StatusOK {
+		return nil, errors.New(r.Status)
+	}
+	var resp addservice.ConcatResponse
+	err := json.NewDecoder(r.Body).Decode(&resp)
+	return resp, err
+}
+
+// encodeHTTPGenericRequest is a transport/http.EncodeRequestFunc that
+// JSON-encodes any request to the request body. Primarily useful in a client.
+func encodeHTTPGenericRequest(_ context.Context, r *http.Request, request interface{}) error {
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(request); err != nil {
+		return err
+	}
+	r.Body = ioutil.NopCloser(&buf)
+	return nil
+}
+
+// encodeHTTPGenericResponse is a transport/http.EncodeResponseFunc that encodes
+// the response as JSON to the response writer. Primarily useful in a server.
+func encodeHTTPGenericResponse(ctx context.Context, w http.ResponseWriter, response interface{}) error {
+	if f, ok := response.(endpoint.Failer); ok && f.Failed() != nil {
+		errorEncoder(ctx, f.Failed(), w)
+		return nil
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	return json.NewEncoder(w).Encode(response)
+}
+`
+
+var DefaultOptionsTemplate = `
+{{$endpointPackageName := BasePath .EndpointImportPath}}
+package {{.PackageName}}
+
+import (
+	{{$endpointPackageName}} "{{.EndpointImportPath}}"
+	"ezrpro.com/micro/spiderconn"
+	"ezrpro.com/micro/spiderconn/middleware"
+	"github.com/go-kit/kit/log"
+	grpctransport "github.com/go-kit/kit/transport/grpc"
+	httptransport "github.com/go-kit/kit/transport/http"
+	stdopentracing "github.com/opentracing/opentracing-go"
+)
+
+type Options struct {
+	endpoints         *{{$endpointPackageName}}.Set
+	logger            log.Logger
+	otTracer          stdopentracing.Tracer
+	endpointOptions   []{{$endpointPackageName}}.Option
+	grpcServerOptions []grpctransport.ServerOption
+	httpServerOptions []httptransport.ServerOption
+}
+
+type Option func(*Options)
+
+func newOptions(opts ...Option) Options {
+	var options Options
+	for _, opt := range opts {
+		opt(&options)
+	}
+
+	if options.endpoints == nil {
+		options.endpoints = {{$endpointPackageName}}.New(options.endpointOptions...)
+	}
+
+	if options.logger == nil {
+		options.logger = spiderconn.DefaultLogger
+	}
+
+	if options.otTracer == nil {
+		options.otTracer = spiderconn.DefaultTracer
+	}
+	return options
+}
+
+func WithEndpoints(endpoints *{{$endpointPackageName}}.Set) Option {
+	return func(o *Options) {
+		o.endpoints = endpoints
+	}
+}
+
+func WithLogger(logger log.Logger) Option {
+	return func(o *Options) {
+		o.logger = logger
+	}
+}
+
+func WithTracer(tracer stdopentracing.Tracer) Option {
+	return func(o *Options) {
+		o.otTracer = tracer
+	}
+}
+
+func WithEndpointOptions(opts ...{{$endpointPackageName}}.Option) Option {
+	return func(o *Options) {
+		o.endpointOptions = append(o.endpointOptions, opts...)
+	}
+}
+
+func WithGrpcServerOptions(grpcServerOptions ...grpctransport.ServerOption) Option {
+	return func(o *Options) {
+		o.grpcServerOptions = append(o.grpcServerOptions, grpcServerOptions...)
+	}
+}
+
+func WithHTTPServerOptions(serverOptions ...httptransport.ServerOption) Option {
+	return func(o *Options) {
+		o.httpServerOptions = append(o.httpServerOptions, serverOptions...)
+	}
+}
+
+type ClientOptions struct {
+	logger             log.Logger
+	otTracer           stdopentracing.Tracer
+	middlewareCreators []middleware.Creator
+	clientOptions      []grpctransport.ClientOption
+	httpClientOptions  []httptransport.ClientOption
+}
+
+type ClientOption func(*ClientOptions)
+
+func newClientOption(opts ...ClientOption) ClientOptions {
+	var options ClientOptions
+	for _, opt := range opts {
+		opt(&options)
+	}
+
+	if options.logger == nil {
+		options.logger = spiderconn.DefaultLogger
+	}
+
+	if options.otTracer == nil {
+		options.otTracer = spiderconn.DefaultTracer
+	}
+	return options
+}
+
+func WithClientLogger(logger log.Logger) ClientOption {
+	return func(o *ClientOptions) {
+		o.logger = logger
+	}
+}
+
+func WithClientTracer(tracer stdopentracing.Tracer) ClientOption {
+	return func(o *ClientOptions) {
+		o.otTracer = tracer
+	}
+}
+
+func WithClientMiddlewares(middlewareCreators ...middleware.Creator) ClientOption {
+	return func(o *ClientOptions) {
+		o.middlewareCreators = append(o.middlewareCreators, middlewareCreators...)
+	}
+}
+
+func WithClientTransportOptions(opts ...grpctransport.ClientOption) ClientOption {
+	return func(o *ClientOptions) {
+		o.clientOptions = append(o.clientOptions, opts...)
+	}
 }
 `

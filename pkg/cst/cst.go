@@ -111,18 +111,25 @@ var (
 )
 
 type Type struct {
-	Star   bool   // 指针类型
-	X      string // 类型前缀或者说包名 例如: 括号包裹部分 (time.)Time  (*)XXXStruct
-	Name   string // go显示类型名称 int, interface{}, XXXStruct
-	GoType GoType // basic, array, map, struct
+	BaseType
+
+	ElementType BaseType
+
+	KeyType   BaseType
+	ValueType BaseType
 }
 
-func (t Type) String() string {
+type BaseType struct {
+	Star     bool   // 指针类型
+	X        string // 类型前缀或者说包名 例如: 括号包裹部分 (time.)Time  (*)XXXStruct
+	Name     string // go显示类型名称 int, interface{}, XXXStruct
+	GoType   GoType // basic, array, map, struct
+	Position token.Position
+}
+
+func (t BaseType) String() string {
 	switch t.GoType {
 	case BasicType:
-		if t.X == "" && !t.Star {
-			return t.Name
-		}
 		buff := bytes.NewBufferString("")
 		if t.Star {
 			buff.WriteString("*")
@@ -135,9 +142,6 @@ func (t Type) String() string {
 		buff.WriteString(t.Name)
 		return buff.String()
 	case StructType:
-		if t.X == "" && !t.Star {
-			return t.Name
-		}
 		buff := bytes.NewBufferString("")
 		if t.Star {
 			buff.WriteString("*")
@@ -153,12 +157,65 @@ func (t Type) String() string {
 	return t.Name
 }
 
+func (t Type) String() string {
+	switch t.GoType {
+	case BasicType:
+		buff := bytes.NewBufferString("")
+		if t.Star {
+			buff.WriteString("*")
+		}
+
+		if t.X != "" {
+			buff.WriteString(t.X)
+			buff.WriteString(".")
+		}
+		buff.WriteString(t.Name)
+		return buff.String()
+	case StructType:
+		buff := bytes.NewBufferString("")
+		if t.Star {
+			buff.WriteString("*")
+		}
+
+		if t.X != "" {
+			buff.WriteString(t.X)
+			buff.WriteString(".")
+		}
+		buff.WriteString(t.Name)
+		return buff.String()
+	case ArrayType:
+		buff := bytes.NewBufferString("[]")
+		if t.Star {
+			buff.WriteString("*")
+		}
+
+		if t.X != "" {
+			buff.WriteString(t.X)
+			buff.WriteString(".")
+		}
+		buff.WriteString(t.ElementType.String())
+		return buff.String()
+	case MapType:
+		buff := bytes.NewBufferString("")
+		if t.Star {
+			buff.WriteString("*")
+		}
+		buff.WriteString("map[")
+		buff.WriteString(t.KeyType.String())
+		buff.WriteString("]")
+
+		buff.WriteString(t.ValueType.String())
+		return buff.String()
+	}
+	return t.Name
+}
+
 type Struct struct {
-	Pos         string   // 结构体位置
-	PackageName string   // 所属的包名
-	Name        string   // 结构体名称
-	Fields      []Field  // 结构体字段
-	Methods     []Method // 结构体函数列表
+	Position    token.Position // 结构体位置
+	PackageName string         // 所属的包名
+	Name        string         // 结构体名称
+	Fields      []Field        // 结构体字段
+	Methods     []Method       // 结构体函数列表
 }
 
 type Var struct {

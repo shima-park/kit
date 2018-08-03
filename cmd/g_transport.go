@@ -1,11 +1,12 @@
 package cmd
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 
 	"ezrpro.com/micro/kit/pkg/cst"
-	"ezrpro.com/micro/kit/pkg/generator"
+	"ezrpro.com/micro/kit/pkg/generator/service"
 	"ezrpro.com/micro/kit/pkg/generator/transport"
 	"ezrpro.com/micro/kit/pkg/utils"
 	"github.com/sirupsen/logrus"
@@ -22,7 +23,7 @@ var transportCmd = &cobra.Command{
 	Short:   "generate source code of go-kit transport",
 	Aliases: []string{"t"},
 	Run: func(cmd *cobra.Command, args []string) {
-		transportType := viper.GetString("g_t_transport_type")
+		//		transportType := viper.GetString("g_t_transport_type")
 		sourceFile := viper.GetString("g_t_source_file")
 		if sourceFile == "" {
 			logrus.Error("You must provide a source file for analyze of ast")
@@ -34,69 +35,52 @@ var transportCmd = &cobra.Command{
 			logrus.Error(err)
 			return
 		}
-
-		var transportTypes []string
-		if transportType == "all" {
-			transportTypes = AllTransportTypes
-		} else {
-			transportTypes = strings.Split(transportType, ",")
+		serviceSuffix := utils.SelectServiceSuffix(sourceFile)
+		err = generateTransport(cst, serviceSuffix)
+		if err != nil {
+			logrus.Error(err)
+			return
 		}
-
-		for _, tt := range transportTypes {
-			transportType := strings.TrimSpace(strings.ToLower(tt))
-			err = generateTransport(cst, transportType)
-			if err != nil {
-				logrus.Error(err)
-				return
-			}
-		}
-
 	},
 }
 
-func generateTransportFuncs(transportTypes ...string) []GenerateFunc {
-	var funcs = make([]GenerateFunc, len(transportTypes))
-	for i, _ := range transportTypes {
-		transportType := transportTypes[i]
-		funcs[i] = func(cst cst.ConcreteSyntaxTree) error {
-			return generateTransport(cst, transportType)
-		}
+func generateTransport(cst cst.ConcreteSyntaxTree, serviceSuffix string) error {
+	baseServiceName := service.GetBaseServiceName(cst.PackageName(), serviceSuffix)
+	transportPath := utils.GetTransportFilePath(baseServiceName)
+	transportPackageName := filepath.Base(transportPath)
+	var options = []transport.Option{
+		transport.WithBaseServiceName(baseServiceName),
+		transport.WithTransportPackageName(transportPackageName),
+		transport.WithServiceSuffix(serviceSuffix),
 	}
-	return funcs
-}
+	for templateName, template := range transport.TemplateMap {
+		filename := filepath.Join(transportPath, fmt.Sprintf("%s.go", templateName.String()))
 
-func generateTransport(cst cst.ConcreteSyntaxTree, transportType string) error {
-	var (
-		gen           = generator.NoopGenerator
-		transportPath = utils.GetTransportFilePath(cst.PackageName())
-		filename      = filepath.Join(transportPath, transportType+".go")
-	)
-
-	switch strings.ToLower(transportType) {
-	case "grpc":
 		file, err := createFile(filename)
 		if err != nil {
+			logrus.Error("Create file ", filename, " error:", err)
 			return err
 		}
+		defer formatAndGoimports(filename)
 		defer file.Close()
 
-		gen = transport.NewTransportGenerator(
-			cst,
-			transport.WithWriter(file),
-			transport.WithTemplateConfig(
-				generator.NewTemplateConfig(cst),
-			),
+		options = append(options,
+			transport.WithReadWriter(
+				templateName,
+				strings.NewReader(template),
+				file),
 		)
+	}
 
-		err = gen.Generate()
-		if err != nil {
-			return err
-		}
+	gen := transport.NewTransportGenerator(
+		cst,
+		options...,
+	)
 
-		formatAndGoimports(filename)
-	case "thrift":
-	case "http":
-
+	err := gen.Generate()
+	if err != nil {
+		logrus.Error(err)
+		return err
 	}
 
 	return nil

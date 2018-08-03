@@ -1,4 +1,4 @@
-package endpoint
+package server
 
 import (
 	"io/ioutil"
@@ -7,36 +7,24 @@ import (
 
 	"ezrpro.com/micro/kit/pkg/cst"
 	gen "ezrpro.com/micro/kit/pkg/generator"
-	"ezrpro.com/micro/kit/pkg/generator/service"
 	"ezrpro.com/micro/kit/pkg/utils"
 )
 
-const (
-	EndpointSuffix = "Endpoint"
-)
-
-type EndpointGenerator struct {
+type ServerGenerator struct {
 	cst  cst.ConcreteSyntaxTree
 	opts Options
 }
 
-func NewEndpointGenerator(t cst.ConcreteSyntaxTree, opts ...Option) gen.Generator {
+func NewServerGenerator(t cst.ConcreteSyntaxTree, opts ...Option) gen.Generator {
 	options := newOptions(opts...)
 
-	if options.baseServiceName == "" {
-		options.baseServiceName = service.GetBaseServiceName(
-			t.PackageName(),
-			options.serviceSuffix,
-		)
-	}
-
-	return &EndpointGenerator{
+	return &ServerGenerator{
 		cst:  t,
 		opts: options,
 	}
 }
 
-func (g *EndpointGenerator) Generate() error {
+func (g *ServerGenerator) Generate() error {
 	for tplName, readWriter := range g.opts.readWriterMap {
 		tplBody, err := ioutil.ReadAll(readWriter.template)
 		if err != nil {
@@ -44,8 +32,7 @@ func (g *EndpointGenerator) Generate() error {
 		}
 
 		t := template.New(string(tplName)).Funcs(map[string]interface{}{
-			"ToLowerFirstCamelCase": utils.ToLowerFirstCamelCase,
-			"BasePath":              filepath.Base,
+			"BasePath": filepath.Base,
 		})
 		t, err = t.Parse(string(tplBody))
 		if err != nil {
@@ -58,10 +45,13 @@ func (g *EndpointGenerator) Generate() error {
 		}
 
 		err = t.Execute(readWriter.writer, map[string]interface{}{
-			"PackageName":       g.opts.endpointPackageName,
-			"ServiceName":       serviceIface.Name,
-			"ServiceMethods":    serviceIface.Methods,
-			"ServiceImportPath": utils.GetServiceImportPath(g.opts.baseServiceName),
+			"BaseServiceName":     g.opts.baseServiceName,
+			"PackageName":         g.opts.serverPackageName,
+			"ServiceName":         serviceIface.Name,
+			"ServiceImportPath":   utils.GetServiceImportPath(g.opts.baseServiceName),
+			"EndpointImportPath":  utils.GetEndpointImportPath(g.opts.baseServiceName),
+			"ProtobufImportPath":  utils.GetProtobufImportPath(g.opts.baseServiceName),
+			"TransportImportPath": utils.GetTransportImportPath(g.opts.baseServiceName),
 		})
 	}
 	return nil

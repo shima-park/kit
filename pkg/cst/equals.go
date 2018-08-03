@@ -81,9 +81,10 @@ func EqualType(expect, actual Type) bool {
 		return false
 	}
 
-	if expect.Star != actual.Star {
-		return false
-	}
+	// 判断是否都是指针?
+	//if expect.Star != actual.Star {
+	//	return false
+	//}
 
 	return true
 }

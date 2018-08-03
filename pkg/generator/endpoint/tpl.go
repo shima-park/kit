@@ -1,63 +1,125 @@
 package endpoint
 
-var defaultTemplate = `
-{{$pkg := .PackageName}}
-{{$ifaceName := .InterfaceName}}
-// THIS FILE IS AUTO GENERATED DO NOT EDIT!!
-package {{$pkg}}
+var DefaultEndpointTemplate = `
+{{$servicePackageName := BasePath .ServiceImportPath}}
+{{$serviceName := .ServiceName}}
+package {{.PackageName}}
 
 import (
 	"context"
-	"time"
 
-	"golang.org/x/time/rate"
-
-	stdopentracing "github.com/opentracing/opentracing-go"
-	stdzipkin "github.com/openzipkin/zipkin-go"
-	"github.com/sony/gobreaker"
-
-	"github.com/go-kit/kit/circuitbreaker"
-	"github.com/go-kit/kit/endpoint"
-	"github.com/go-kit/kit/log"
-	"github.com/go-kit/kit/metrics"
-	"github.com/go-kit/kit/ratelimit"
-	"github.com/go-kit/kit/tracing/opentracing"
-	"github.com/go-kit/kit/tracing/zipkin"
-
-	"{{.ServiceImportPath}}"
+	"ezrpro.com/micro/spiderconn"
+        {{$servicePackageName}} "{{.ServiceImportPath}}"
 )
 
 // Set collects all of the endpoints that compose an add service. It's meant to
 // be used as a helper struct, to collect all of the endpoints into a single
 // parameter.
 type Set struct {
-{{range $k, $method := .InterfaceMethods}}
-	{{$method.Name}}Endpoint    endpoint.Endpoint
+{{range $index, $method := .ServiceMethods}}
+	{{$method.Name}}Endpoint    spiderconn.EndpointWrapper
 {{end}}
 }
 
 // New returns a Set that wraps the provided server, and wires in all of the
 // expected endpoint middlewares via the various parameters.
-func New(svc {{.PackageName}}.{{ToCamelCase .PackageName}}, logger log.Logger, duration metrics.Histogram, otTracer stdopentracing.Tracer, zipkinTracer *stdzipkin.Tracer) Set {
-{{range $k, $method := .InterfaceMethods}}
-	var {{ToLowerFirstCamelCase $method.Name}} endpoint.Endpoint
+func New(opts ...Option) *Set {
+	var options Options
+	for _, opt := range opts {
+		opt(&options)
+	}
+
+	if options.service == nil {
+		options.service = {{$servicePackageName}}.New(options.serviceOptions...)
+	}
+
+{{range $index, $method := .ServiceMethods}}
+	var {{ToLowerFirstCamelCase $method.Name}} spiderconn.EndpointWrapper
 	{
-		{{ToLowerFirstCamelCase $method.Name}} = Make{{$method.Name}}Endpoint(svc)
-		{{ToLowerFirstCamelCase $method.Name}} = ratelimit.NewErroringLimiter(rate.NewLimiter(rate.Every(time.Second), 1))({{ToLowerFirstCamelCase $method.Name}})
-		{{ToLowerFirstCamelCase $method.Name}} = circuitbreaker.Gobreaker(gobreaker.NewCircuitBreaker(gobreaker.Settings{}))({{ToLowerFirstCamelCase $method.Name}})
-		{{ToLowerFirstCamelCase $method.Name}} = opentracing.TraceServer(otTracer, "{{$method.Name}}")({{ToLowerFirstCamelCase $method.Name}})
-		{{ToLowerFirstCamelCase $method.Name}} = zipkin.TraceEndpoint(zipkinTracer, "{{$method.Name}}")({{ToLowerFirstCamelCase $method.Name}})
-		{{ToLowerFirstCamelCase $method.Name}} = LoggingMiddleware(log.With(logger, "method", "{{$method.Name}}"))({{ToLowerFirstCamelCase $method.Name}})
-		{{ToLowerFirstCamelCase $method.Name}} = InstrumentingMiddleware(duration.With("method", "{{$method.Name}}"))({{ToLowerFirstCamelCase $method.Name}})
+		{{ToLowerFirstCamelCase $method.Name}} = MakeSumEndpoint(options.service)
+		for _, middlewareCreator := range options.middlewareCreators {
+			{{ToLowerFirstCamelCase $method.Name}}.Wrapper(middlewareCreator({{ToLowerFirstCamelCase $method.Name}}.Name()))
+		}
 	}
 {{end}}
 
-	return Set{
-{{range $k, $method := .InterfaceMethods}}
-	{{$method.Name}}Endpoint:    {{ToLowerFirstCamelCase $method.Name}},
+	return &Set{
+{{range $index, $method := .ServiceMethods}}
+		{{$method.Name}}Endpoint: {{ToLowerFirstCamelCase $method.Name}},
 {{end}}
 	}
 }
+
+{{range $index, $method := .ServiceMethods}}
+// {{$method.Name}} implements the service interface, so Set may be used as a service.
+// This is primarily useful in the context of a client library.
+func (s Set) {{$method.Name}}(ctx context.Context, req *{{$servicePackageName}}.{{$method.Name}}Request) (resp *{{$servicePackageName}}.{{$method.Name}}Response, err error) {
+	temp, err := s.{{$method.Name}}Endpoint.Do(ctx, req)
+	if err != nil {
+		return
+	}
+	response := temp.(*{{$servicePackageName}}.{{$method.Name}}Response)
+	return response, response.Failed()
+}
+
+// Make{{$method.Name}}Endpoint constructs a {{$method.Name}} endpoint wrapping the service.
+func Make{{$method.Name}}Endpoint(s {{$servicePackageName}}.{{$serviceName}}) spiderconn.EndpointWrapper {
+	return spiderconn.NewWrapper("{{$method.Name}}", func(ctx context.Context, request interface{}) (resp interface{}, err error) {
+		req := request.(*{{$servicePackageName}}.{{$method.Name}}Request)
+		return s.{{$method.Name}}(ctx, req)
+	})
+}
+{{end}}
+`
+
+var DefaultOptionsTemplate = `
+{{$servicePackageName := BasePath .ServiceImportPath}}
+package {{.PackageName}}
+
+import (
+	{{$servicePackageName}} "{{.ServiceImportPath}}"
+	"ezrpro.com/micro/spiderconn/middleware"
+)
+
+type Options struct {
+	middlewareCreators []middleware.Creator
+	service            {{$servicePackageName}}.{{.ServiceName}}
+	serviceOptions     []{{$servicePackageName}}.Option
+}
+
+type Option func(*Options)
+
+func WithMiddlewareCreators(cs ...middleware.Creator) Option {
+	return func(o *Options) {
+		o.middlewareCreators = append(o.middlewareCreators, cs...)
+	}
+}
+
+func WithService(service {{$servicePackageName}}.{{.ServiceName}}) Option {
+	return func(o *Options) {
+		o.service = service
+	}
+}
+
+func WithServiceOptions(opts ...{{$servicePackageName}}.Option) Option {
+	return func(o *Options) {
+		o.serviceOptions = append(o.serviceOptions, opts...)
+	}
+}
+`
+
+var DefaultMiddlewareTemplate = `
+package {{.PackageName}}
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/go-kit/kit/endpoint"
+	"github.com/go-kit/kit/log"
+	"github.com/go-kit/kit/metrics"
+)
 
 // InstrumentingMiddleware returns an endpoint middleware that records
 // the duration of each invocation to the passed histogram. The middleware adds
@@ -90,57 +152,4 @@ func LoggingMiddleware(logger log.Logger) endpoint.Middleware {
 		}
 	}
 }
-
-{{range $methodIndex, $method := .InterfaceMethods}}
-// {{$method.Name}} implements the service interface, so Set may be used as a service.
-// This is primarily useful in the context of a client library.
-func (s Set) {{$method.Name}}(ctx context.Context, req *{{$pkg}}.{{$method.Name}}Request) (resp *{{$pkg}}.{{$method.Name}}Response, err error) {
-	temp, err := s.{{$method.Name}}Endpoint({{JoinFieldKeysByComma $method.Params}})
-	if err != nil {
-		return
-	}
-	response := temp.(*{{$method.Name}}Response)
-	return response.V, response.Err
-}
-{{end}}
-
-{{range .RequestsAndResponses}}
-// Make{{.MethodName}}Endpoint constructs a {{.MethodName}} endpoint wrapping the service.
-func Make{{.MethodName}}Endpoint(s {{$pkg}}.{{$ifaceName}}) endpoint.Endpoint {
-	return func(ctx context.Context, request interface{}) (resp interface{}, err error) {
-		req := request.(*{{.Request.Name}})
-		v, err := s.{{.MethodName}}(ctx, &{{$pkg}}.{{.Request.Name}}{
-                    {{range $fk, $fv := .Request.Fields}}{{$fv.Name}}: req.{{$fv.Name}},
-                    {{end}}
-                })
-		return &{{.MethodName}}Response{V: v, Err: err}, nil
-	}
-}
-{{end}}
-
-
-// compile time assertions for our response types implementing endpoint.Failer.
-var (
-{{range .Responses}}
-	_ endpoint.Failer = {{.Name}}{}
-{{end}}
-)
-
-{{range .RequestsAndResponses}}
-
-// {{.Request.Name}} collects the request parameters for the Sum method.
-type {{.Request.Name}} struct {
-{{JoinFieldsByLineBreak .Request.Fields}}
-}
-
-// {{.Response.Name}} collects the response values for the Sum method.
-type {{.Response.Name}} struct {
-	V   *{{$pkg}}.{{.Response.Name}}   ` + "`json:\"v\"`" + `
-	Err error ` + "`json:\"-\"`" + ` // should be intercepted by Failed/errorEncoder
-}
-
-// Failed implements endpoint.Failer.
-func (r {{.Response.Name}}) Failed() error { return r.Err }
-
-{{end}}
 `

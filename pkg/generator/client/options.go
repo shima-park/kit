@@ -1,4 +1,4 @@
-package transport
+package client
 
 import (
 	"io"
@@ -8,15 +8,15 @@ import (
 )
 
 const (
-	GRPCTemplate    Template = "grpc"
-	HTTPTemplate    Template = "http"
-	OptionsTempalte Template = "options"
+	ClientTemplate   Template = "client"
+	OptionsTempalte  Template = "options"
+	ExportedTemplate Template = "exported"
 )
 
 var TemplateMap = map[Template]string{
-	GRPCTemplate:    DefaultGRPCTemplate,
-	HTTPTemplate:    DefaultHTTPTemplate,
-	OptionsTempalte: DefaultOptionsTemplate,
+	ClientTemplate:   DefaultClientTemplate,
+	OptionsTempalte:  DefaultOptionsTemplate,
+	ExportedTemplate: DefaultExportedTemplate,
 }
 
 type Template string
@@ -31,10 +31,10 @@ type readWriter struct {
 }
 
 type Options struct {
-	readWriterMap        map[Template]readWriter
-	transportPackageName string
-	baseServiceName      string
-	serviceSuffix        string
+	readWriterMap     map[Template]readWriter
+	baseServiceName   string
+	clientPackageName string
+	serviceSuffix     string
 }
 
 type Option func(*Options)
@@ -48,7 +48,6 @@ func newOptions(opts ...Option) Options {
 	if options.serviceSuffix == "" {
 		options.serviceSuffix = utils.GetServiceSuffix()
 	}
-
 	return options
 }
 
@@ -73,9 +72,9 @@ func WithBaseServiceName(baseServiceName string) Option {
 	}
 }
 
-func WithTransportPackageName(transportPackageName string) Option {
+func WithClientPackageName(clientPackageName string) Option {
 	return func(o *Options) {
-		o.transportPackageName = transportPackageName
+		o.clientPackageName = clientPackageName
 	}
 }
 

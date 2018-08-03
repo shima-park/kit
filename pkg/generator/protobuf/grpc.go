@@ -2,47 +2,25 @@ package protobuf
 
 import (
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
-	"text/template"
 
 	"ezrpro.com/micro/kit/pkg/cst"
 	gen "ezrpro.com/micro/kit/pkg/generator"
+	"ezrpro.com/micro/kit/pkg/generator/service"
+	"ezrpro.com/micro/kit/pkg/utils"
 )
 
 type ProtobufGenerator struct {
 	cst           cst.ConcreteSyntaxTree
-	template      *template.Template
 	opts          Options
 	referenceType map[string]struct{} // key: [struct.Name or type.Name] val: struct{}{}
 }
 
 func NewProtobufGenerator(t cst.ConcreteSyntaxTree, opts ...Option) gen.Generator {
-	var options Options
-	for _, opt := range opts {
-		opt(&options)
-	}
-
-	if options.serviceNameNormalizer == nil {
-		options.serviceNameNormalizer = gen.NoopNormalizer
-	}
-
-	if options.fieldNameNormalizer == nil {
-		options.fieldNameNormalizer = gen.NoopNormalizer
-	}
-
-	if options.typeFilter == nil {
-		options.typeFilter = gen.DefaultTypeFilter
-	}
-
-	if options.structFilter == nil {
-		options.structFilter = gen.DefaultStructFilter
-	}
-
-	if options.writer == nil {
-		options.writer = gen.DefaultWriter
-	}
+	options := newOptions(opts...)
 
 	return &ProtobufGenerator{
 		cst:           t,
@@ -52,10 +30,13 @@ func NewProtobufGenerator(t cst.ConcreteSyntaxTree, opts ...Option) gen.Generato
 }
 
 func (g *ProtobufGenerator) Generate() error {
+	baseServiceName := service.GetBaseServiceName(g.cst.PackageName(), g.opts.serviceSuffix)
+	protobufPath := utils.GetProtobufFilePath(baseServiceName)
+	protobufPackageName := filepath.Base(protobufPath)
 	w := NewSugerWriter(g.opts.writer)
 	w.P(`syntax = "proto3";`)
 	w.P(``)
-	w.P("package %s;", g.cst.PackageName())
+	w.P("package %s;", protobufPackageName)
 	w.P(``)
 
 	for _, i := range g.cst.Interfaces() {
@@ -264,7 +245,7 @@ func (g *ProtobufGenerator) checkPBTag(strc *cst.Struct) {
 
 	// 使用了pb这个tag但是并没有给所有的字段加上，这种情况没办法增加序列号或者检查命名冲突
 	if useTagCount > 0 && useTagCount != len(strc.Fields) {
-		panic(fmt.Sprintf("If you use the \"pb\" tag you must set for(StructName:%s) all fields\n %s", strc.Name, strc.Pos))
+		panic(fmt.Sprintf("If you use the \"pb\" tag you must set for(StructName:%s) all fields\n %s", strc.Name, strc.Position.String()))
 	}
 }
 
@@ -338,6 +319,8 @@ func (g *ProtobufGenerator) GoType2GrpcType(t cst.Type) (grpcType string, found 
 		}
 		return "repeated " + grpcType, found
 	case cst.MapType:
+		// TODO Key in map field cannot be float/doubl, bytes or message types.
+		// protobuf的key类型不能为float/doubl, bytes or message
 		quoteStart := strings.Index(goType, "[")
 		quoteEnd := strings.Index(goType, "]")
 		keyStr := goType[quoteStart+1 : quoteEnd]

@@ -1,8 +1,6 @@
 package main
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 
 	"ezrpro.com/micro/kit/cmd"
@@ -14,13 +12,8 @@ import (
 func main() {
 	utils.SetDefaults()
 	viper.AutomaticEnv()
-	gosrc := utils.GetGOPATH() + string(filepath.Separator) + "src" + string(filepath.Separator)
-	pwd, err := os.Getwd()
-	if err != nil {
-		logrus.Error(err)
-		return
-	}
-	if !strings.HasPrefix(pwd, gosrc) {
+
+	if !strings.HasPrefix(utils.GetPWD(), utils.GetGoSrc()) {
 		logrus.Error("The project must be in the $GOPATH/src folder for the generator to work.")
 		return
 	}
