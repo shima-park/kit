@@ -3,7 +3,6 @@ package transport
 import (
 	"bytes"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"path/filepath"
 	"strings"
@@ -12,7 +11,6 @@ import (
 	"ezrpro.com/micro/kit/pkg/cst"
 	gen "ezrpro.com/micro/kit/pkg/generator"
 	"ezrpro.com/micro/kit/pkg/utils"
-	"github.com/sirupsen/logrus"
 )
 
 type TransportGenerator struct {
@@ -47,6 +45,8 @@ func (g *TransportGenerator) Generate() error {
 			"BasePath":                  filepath.Base,
 			"ToLower":                   strings.ToLower,
 			"GenerateAssignmentSegment": NewAssignmentGeneratorFactory(g.cst, pbCST).Generate,
+			"NewSimpleAlias":            NewSimpleAlias,
+			"NewObjectAlias":            NewObjectAlias(g.cst, pbCST),
 		})
 		t, err = t.Parse(string(tplBody))
 		if err != nil {
@@ -107,14 +107,6 @@ func findAssignmentStruct(dst *cst.Struct, srcs []gen.ReqAndResp) *cst.Struct {
 	return nil
 }
 
-func generateAssignmentSegment(dst *cst.Struct, srcs []gen.ReqAndResp, srcAlias string) string {
-	src := findAssignmentStruct(dst, srcs)
-	if dst != nil {
-		return generateStructAssignmentSegment(src, dst, srcAlias)
-	}
-	return ""
-}
-
 type AssignmentGeneratorFactory struct {
 	cst   cst.ConcreteSyntaxTree
 	pbcst cst.ConcreteSyntaxTree
@@ -124,7 +116,7 @@ func NewAssignmentGeneratorFactory(cst cst.ConcreteSyntaxTree, pbcst cst.Concret
 	return &AssignmentGeneratorFactory{cst: cst, pbcst: pbcst}
 }
 
-func (g *AssignmentGeneratorFactory) Generate(dst *cst.Struct, srcs []gen.ReqAndResp, srcAlias string) string {
+func (g *AssignmentGeneratorFactory) Generate(dst *cst.Struct, srcs []gen.ReqAndResp, srcAlias Alias) string {
 	src := findAssignmentStruct(dst, srcs)
 	if src != nil {
 		n := &AssignmentGenerator{
@@ -148,7 +140,129 @@ type AssignmentGenerator struct {
 	referenceType map[string]struct{} // key: [struct.Name or type.Name] val: struct{}{}
 }
 
-func (g *AssignmentGenerator) Generate(srcAlias string) string {
+// TODO 两种别名处理，判断指针为空
+type Alias interface {
+	CheckNil() (statement string, isNeed bool)
+	String() string
+	IsStar() bool
+	With(sub string) Alias
+}
+
+type SimpleAlias struct {
+	name string
+}
+
+func NewSimpleAlias(name string) Alias {
+	return SimpleAlias{name: name}
+}
+
+func (sa SimpleAlias) CheckNil() (statement string, isNeed bool) {
+	return "", false
+}
+
+func (sa SimpleAlias) String() string {
+	return sa.name
+}
+
+func (sa SimpleAlias) IsStar() bool {
+	return false
+}
+
+func (sa SimpleAlias) With(sub string) Alias {
+	sa.name += "." + sub
+	return sa
+}
+
+type ObjectAlias struct {
+	name       string
+	csts       []cst.ConcreteSyntaxTree
+	rootStruct *cst.Struct
+	isStar     bool
+}
+
+func NewObjectAlias(csts ...cst.ConcreteSyntaxTree) func(name string, pkg, structName string, isStar bool) Alias {
+	return func(name, pkg, structName string, isStar bool) Alias {
+		rootStruct, found := findStruct(pkg, structName, csts...)
+		if !found {
+			panic(fmt.Sprintf("Not found struct(%s, %s) ", pkg, structName))
+		}
+		return ObjectAlias{
+			name:       name,
+			rootStruct: rootStruct,
+			isStar:     isStar,
+			csts:       csts,
+		}
+	}
+}
+
+func (oa ObjectAlias) CheckNil() (statement string, isNeed bool) {
+	aliases := strings.Split(oa.name, ".")
+	concat := []string{}
+	conditions := []string{}
+	tempStruct := oa.rootStruct
+	for i, alias := range aliases {
+		if i == 0 {
+			if oa.isStar {
+				concat = append(concat, alias)
+				conditions = append(conditions, fmt.Sprintf(" %s != nil ", strings.Join(concat, ".")))
+			}
+		} else {
+			for _, field := range tempStruct.Fields {
+				if field.Name == alias {
+					pkg := oa.rootStruct.PackageName
+					typeName := field.Type.Name
+					typeStruct, found := findStruct(pkg, typeName, oa.csts...)
+					if found {
+						tempStruct = typeStruct
+					} else {
+						panic(fmt.Sprintf("not found struct(%s.%s)", pkg, typeName))
+					}
+
+					concat = append(concat, field.Name)
+
+					if field.Type.Star {
+						conditions = append(conditions, fmt.Sprintf(" %s != nil ", strings.Join(concat, ".")))
+					}
+				}
+			}
+		}
+	}
+
+	if len(conditions) > 0 {
+		return strings.Join(conditions, "&&"), true
+	}
+
+	return "", false
+}
+
+func (oa ObjectAlias) String() string {
+	return oa.name
+}
+
+func (oa ObjectAlias) IsStar() bool {
+	return oa.isStar
+}
+
+func (oa ObjectAlias) With(sub string) Alias {
+	oa.name += "." + sub
+	return oa
+}
+
+func findStruct(packageName string, structName string, csts ...cst.ConcreteSyntaxTree) (*cst.Struct, bool) {
+	var (
+		s     *cst.Struct
+		found bool
+	)
+	for _, cst := range csts {
+		s, found = cst.StructMap()[packageName][structName]
+		if found {
+			return s, found
+		}
+	}
+	return s, found
+}
+
+func (g *AssignmentGenerator) Generate(srcAlias Alias) string {
 	for _, srcField := range g.src.Fields {
 		for _, dstField := range g.dst.Fields {
 			if srcField.Name == dstField.Name {
@@ -169,46 +283,84 @@ func (g *AssignmentGenerator) findStruct(packageName string, structName string) 
 	return nil
 }
 
-func (g *AssignmentGenerator) generateAssignmentSegment(srcAlias string, src cst.Field, dst cst.Field) {
-
+func (g *AssignmentGenerator) generateAssignmentSegment(srcAlias Alias, src cst.Field, dst cst.Field) {
 	switch dst.Type.GoType {
 	case cst.BasicType:
 		if src.Type.Name == dst.Type.Name {
 			if src.Type.Star && !dst.Type.Star {
 				// F float64    req.F *float64
 				// F: *req.F,
-				g.println("%s: func() (i %s) { if %s != nil { i = *%s.%s } ; return i }(),", dst.Name, dst.Type.String(), srcAlias, srcAlias, src.Name)
+				if statement, isNeed := srcAlias.CheckNil(); isNeed {
+					g.println("%s: func() (i %s) { if %s && %s.%s != nil { i = *%s.%s } ; return i }(),",
+						dst.Name, dst.Type.String(), statement, srcAlias, src.Name, srcAlias, src.Name)
+				} else {
+					g.println("%s: func() (i %s) { return *%s.%s } (),",
+						dst.Name, dst.Type.String(), srcAlias, src.Name)
+				}
+
 			} else if !src.Type.Star && dst.Type.Star {
 				// F *float64   req.F float64
 				// F: &req.F,
-				g.println("%s: &%s.%s,", dst.Name, srcAlias, src.Name)
+				if statement, isNeed := srcAlias.CheckNil(); isNeed {
+					g.println("%s: func() (i %s) { if %s { i = &%s.%s } ; return i }(),",
+						dst.Name, dst.Type.String(), statement, srcAlias, src.Name)
+				} else {
+					g.println("%s: func() (i %s) { return &%s.%s }(),",
+						dst.Name, dst.Type.String(), srcAlias, src.Name)
+				}
 			} else {
 				// Message string    resp.Message string
 				//Message: resp.Message,
-				g.println("%s: %s.%s,", dst.Name, srcAlias, src.Name)
+				if statement, isNeed := srcAlias.CheckNil(); isNeed {
+					g.println("%s: func() (i %s) { if %s { i = %s.%s } ; return i }(),",
+						dst.Name, dst.Type.String(), statement, srcAlias, src.Name)
+				} else {
+					g.println("%s: func() (i %s) { return %s.%s }(),",
+						dst.Name, dst.Type.String(), srcAlias, src.Name)
+				}
 			}
 		} else {
 			if src.Type.Star && !dst.Type.Star {
 				// T int64  req.T *int
 				// T: int64(*req.T),
-				g.println("%s: %s(*%s.%s),", dst.Name, dst.Type.Name, srcAlias, src.Name)
+				if statement, isNeed := srcAlias.CheckNil(); isNeed {
+					g.println("%s: func() (i %s) { if %s && %s.%s != nil { i = %s(*%s.%s) } ; return i }(),",
+						dst.Name, dst.Type.String(), statement, srcAlias, src.Name, dst.Type.Name, srcAlias, src.Name)
+				} else {
+					g.println("%s: func() (i %s) { return %s(*%s.%s) }(),",
+						dst.Name, dst.Type.String(), dst.Type.Name, srcAlias, src.Name)
+				}
 			} else if !src.Type.Star && dst.Type.Star {
 				// Y *int64    req.Y int
 				// Y: func(i int) *int64 { return &i }(req.Y),
-				g.println("%s: func() %s { i := %s(%s.%s); return &i }(),", dst.Name, dst.Type.String(), dst.Type.Name, srcAlias, src.Name)
+				if statement, isNeed := srcAlias.CheckNil(); isNeed {
+					g.println("%s: func() (i %s) { if %s { k := %s(%s.%s);i = &k } ; return i }(),",
+						dst.Name, dst.Type.String(), statement, dst.Type.Name, srcAlias, src.Name)
+				} else {
+					g.println("%s: func() (i %s) { k := %s(%s.%s);i = &k ; return i }(),",
+						dst.Name, dst.Type.String(), dst.Type.Name, srcAlias, src.Name)
+				}
 			} else {
 				// Code int64  resp.Code int
 				// Code: int64(resp.Code),
-				g.println("%s: %s(%s.%s),", dst.Name, dst.Type.Name, srcAlias, src.Name)
+				if statement, isNeed := srcAlias.CheckNil(); isNeed {
+					g.println("%s: func() (i %s) { if %s { i = %s(%s.%s) } ; return i }(),",
+						dst.Name, dst.Type.String(), statement, dst.Type.Name, srcAlias, src.Name)
+				} else {
+					g.println("%s: func() (i %s) { return %s(%s.%s) }(),",
+						dst.Name, dst.Type.String(), dst.Type.Name, srcAlias, src.Name)
+				}
 			}
 		}
 
 	case cst.ArrayType:
 		switch dst.Type.ElementType.GoType {
 		case cst.BasicType:
-			if src.Type.Name == dst.Type.Name &&
-				src.Type.Star == dst.Type.Star {
-				g.println("%s: %s.%s,", dst.Name, srcAlias, src.Name)
+			if src.Type.Name == dst.Type.Name {
+				if src.Type.Star == dst.Type.Star {
+					g.println("%s: %s.%s,", dst.Name, srcAlias, src.Name)
+					return
+				}
 			}
 		default:
 			srcStruct := g.findStruct(g.src.PackageName, src.Type.ElementType.Name)
@@ -231,7 +383,7 @@ func (g *AssignmentGenerator) generateAssignmentSegment(srcAlias string, src cst
 			for _, srcField := range srcStruct.Fields {
 				for _, dstField := range dstStruct.Fields {
 					if srcField.Name == dstField.Name {
-						g.generateAssignmentSegment("v", srcField, dstField)
+						g.generateAssignmentSegment(NewSimpleAlias("v"), srcField, dstField)
 					}
 				}
 			}
@@ -239,7 +391,6 @@ func (g *AssignmentGenerator) generateAssignmentSegment(srcAlias string, src cst
 
 			g.println("}")
 			g.println("return")
-			//)return &i }(%s.%s),", dst.Name, src.Type.Name, dst.Type.String(), fmt.Sprintf("%s.%s", srcAlias, src.Name), src.Name)
 			g.println("}(%s),", fmt.Sprintf("%s.%s", srcAlias, src.Name))
 		}
 	case cst.MapType:
@@ -271,7 +422,7 @@ func (g *AssignmentGenerator) generateAssignmentSegment(srcAlias string, src cst
 			for _, srcField := range srcStruct.Fields {
 				for _, dstField := range dstStruct.Fields {
 					if srcField.Name == dstField.Name {
-						g.generateAssignmentSegment("v", srcField, dstField)
+						g.generateAssignmentSegment(NewSimpleAlias("v"), srcField, dstField)
 					}
 				}
 			}
@@ -287,6 +438,7 @@ func (g *AssignmentGenerator) generateAssignmentSegment(srcAlias string, src cst
 			srcStruct := g.findStruct(g.src.PackageName, src.Type.Name)
 			dstStruct := g.findStruct(g.dst.PackageName, dst.Type.Name)
 			dst.Type.X = dstStruct.PackageName
+
 			if dst.Type.Star {
 				removeStarType := dst.Type
 				removeStarType.Star = false
@@ -298,7 +450,7 @@ func (g *AssignmentGenerator) generateAssignmentSegment(srcAlias string, src cst
 			for _, srcField := range srcStruct.Fields {
 				for _, dstField := range dstStruct.Fields {
 					if srcField.Name == dstField.Name {
-						g.generateAssignmentSegment(fmt.Sprintf("%s.%s", srcAlias, src.Name), srcField, dstField)
+						g.generateAssignmentSegment(srcAlias.With(src.Name), srcField, dstField)
 					}
 				}
 			}
@@ -315,38 +467,4 @@ func (g *AssignmentGenerator) print(format string, a ...interface{}) {
 
 func (g *AssignmentGenerator) println(format string, a ...interface{}) {
 	g.writer.WriteString(fmt.Sprintf(format+"\n", a...))
-}
-
-func generateStructAssignmentSegment(src *cst.Struct, dst *cst.Struct, srcAlias string) string {
-	buff := bytes.NewBufferString("")
-	for _, dstField := range dst.Fields {
-		for _, srcField := range src.Fields {
-			if srcField.Name != dstField.Name {
-				continue
-			}
-			generateFieldAssignmentSegment(buff, srcField, dstField, srcAlias)
-		}
-	}
-
-	return buff.String()
-}
-
-func generateFieldAssignmentSegment(buff io.Writer, srcField cst.Field, dstField cst.Field, srcAlias string) {
-	logrus.Info(
-		cst.EqualStructField(srcField, dstField),
-		cst.IsBasicType(srcField.Type.Name) &&
-			cst.IsBasicType(dstField.Type.Name),
-		dstField.Name, srcAlias, srcField.Name,
-		"----type----",
-		dstField.Type.String(), srcField.Type.String(),
-	)
-	if cst.EqualStructField(srcField, dstField) {
-		buff.Write([]byte(fmt.Sprintf("%s: %s.%s,\n", dstField.Name, srcAlias, srcField.Name)))
-		return
-	}
-	if cst.IsBasicType(srcField.Type.Name) &&
-		cst.IsBasicType(dstField.Type.Name) {
-		buff.Write([]byte(fmt.Sprintf("%s: %s(%s.%s),\n", dstField.Name, dstField.Type.String(), srcAlias, srcField.Name)))
-		return
-	}
 }

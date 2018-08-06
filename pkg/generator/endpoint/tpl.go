@@ -36,7 +36,7 @@ func New(opts ...Option) *Set {
 {{range $index, $method := .ServiceMethods}}
 	var {{ToLowerFirstCamelCase $method.Name}} spiderconn.EndpointWrapper
 	{
-		{{ToLowerFirstCamelCase $method.Name}} = MakeSumEndpoint(options.service)
+		{{ToLowerFirstCamelCase $method.Name}} = Make{{$method.Name}}Endpoint(options.service)
 		for _, middlewareCreator := range options.middlewareCreators {
 			{{ToLowerFirstCamelCase $method.Name}}.Wrapper(middlewareCreator({{ToLowerFirstCamelCase $method.Name}}.Name()))
 		}

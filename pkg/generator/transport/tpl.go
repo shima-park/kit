@@ -26,7 +26,7 @@ import (
 
 type grpcServer struct {
 {{range $index, $method := .ServiceMethods}}
-	{{ToLower $method.Name}} grpctransport.Handler
+	{{ToLowerFirstCamelCase $method.Name}} grpctransport.Handler
 {{end}}
 }
 
@@ -41,7 +41,7 @@ func NewGRPCServer(opts ...Option) {{.ProtobufCST.PackageName}}.{{.ProtobufCST.S
 
 	return &grpcServer{
 {{range $index, $method := .ServiceMethods}}
-		{{ToLower $method.Name}}: grpctransport.NewServer(
+		{{ToLowerFirstCamelCase $method.Name}}: grpctransport.NewServer(
 			options.endpoints.{{$method.Name}}Endpoint.Do,
 			decodeGRPC{{$method.Name}}Request,
 			encodeGRPC{{$method.Name}}Response,
@@ -57,7 +57,7 @@ func NewGRPCServer(opts ...Option) {{.ProtobufCST.PackageName}}.{{.ProtobufCST.S
 }
 {{range $index, $method := .ServiceMethods}}
 func (s *grpcServer) {{$method.Name}}(ctx context.Context, req *{{$protobufPackageName}}.{{$method.Name}}Request) (*{{$protobufPackageName}}.{{$method.Name}}Response, error) {
-	_, resp, err := s.sum.ServeGRPC(ctx, req)
+	_, resp, err := s.{{ToLowerFirstCamelCase $method.Name}}.ServeGRPC(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -77,10 +77,10 @@ func NewGRPCClient(conn *grpc.ClientConn, opts ...ClientOption) {{$servicePackag
 	// made your own client library, you'd do this work there, so your server
 	// could rely on a consistent set of client behavior.
 {{range $index, $method := .ServiceMethods}}
-	var {{ToLower $method.Name}}Wrapper spiderconn.EndpointWrapper
+	var {{ToLowerFirstCamelCase $method.Name}}Wrapper spiderconn.EndpointWrapper
 	{
 		method := "{{$method.Name}}"
-		{{ToLower $method.Name}}Endpoint := grpctransport.NewClient(
+		{{ToLowerFirstCamelCase $method.Name}}Endpoint := grpctransport.NewClient(
 			conn,
 			"{{$protobufPackageName}}.{{ToCamelCase $baseServiceName}}",
 			method,
@@ -90,9 +90,9 @@ func NewGRPCClient(conn *grpc.ClientConn, opts ...ClientOption) {{$servicePackag
 			append(options.clientOptions, grpctransport.ClientBefore(opentracing.ContextToGRPC(options.otTracer, options.logger)))...,
 		).Endpoint()
 		for _, middlewareCreator := range options.middlewareCreators {
-			{{ToLower $method.Name}}Endpoint = middlewareCreator(method)({{ToLower $method.Name}}Endpoint)
+			{{ToLowerFirstCamelCase $method.Name}}Endpoint = middlewareCreator(method)({{ToLowerFirstCamelCase $method.Name}}Endpoint)
 		}
-		{{ToLower $method.Name}}Wrapper = spiderconn.NewWrapper(method, {{ToLower $method.Name}}Endpoint)
+		{{ToLowerFirstCamelCase $method.Name}}Wrapper = spiderconn.NewWrapper(method, {{ToLowerFirstCamelCase $method.Name}}Endpoint)
 	}
 {{end}}
 	// Returning the endpoint.Set as a {{$servicePackageName}}.{{.ServiceName}} relies on the
@@ -100,7 +100,7 @@ func NewGRPCClient(conn *grpc.ClientConn, opts ...ClientOption) {{$servicePackag
 	// of glue code.
 	return addendpoint.Set{
 {{range $index, $method := .ServiceMethods}}
-		{{$method.Name}}Endpoint: {{ToLower $method.Name}}Wrapper,
+		{{$method.Name}}Endpoint: {{ToLowerFirstCamelCase $method.Name}}Wrapper,
 {{end}}
 	}
 }
@@ -113,7 +113,8 @@ func decodeGRPC{{.Request.Name}}(_ context.Context, grpcReq interface{}) (interf
 	req := grpcReq.(*{{$protobufPackageName}}.{{.Request.Name}})
         {{if not .Request}}_ = req{{end}}
 	return &{{$servicePackageName}}.{{.Request.Name}}{
-            {{GenerateAssignmentSegment .Request $pbRequestAndResponseList "req"}}
+            {{$alias := NewObjectAlias "req" $protobufPackageName .Request.Name true}}
+            {{GenerateAssignmentSegment .Request $pbRequestAndResponseList $alias}}
         }, nil
 }
 {{end}}
@@ -124,7 +125,8 @@ func decodeGRPC{{.Request.Name}}(_ context.Context, grpcReq interface{}) (interf
 func decodeGRPC{{.Response.Name}}(_ context.Context, grpcResponse interface{}) (interface{}, error) {
 	resp := grpcResponse.(*{{$protobufPackageName}}.{{.Response.Name}})
 	return &{{$servicePackageName}}.{{.Response.Name}}{
-            {{GenerateAssignmentSegment .Response $pbRequestAndResponseList "resp"}}
+            {{$alias := NewObjectAlias "resp" $protobufPackageName .Response.Name true}}
+            {{GenerateAssignmentSegment .Response $pbRequestAndResponseList $alias}}
         }, nil
 }
 {{end}}
@@ -139,7 +141,8 @@ func encodeGRPC{{.Request.Name}}(_ context.Context, request interface{}) (interf
 	req := request.(*{{$servicePackageName}}.{{.Request.Name}})
         {{if not .Request}}_ = req{{end}}
 	return &{{$protobufPackageName}}.{{.Request.Name}}{
-            {{GenerateAssignmentSegment .Request $requestAndResponseList "req"}}
+            {{$alias := NewObjectAlias "req" $servicePackageName .Request.Name true}}
+            {{GenerateAssignmentSegment .Request $requestAndResponseList $alias}}
         }, nil
 }
 {{end}}
@@ -150,7 +153,8 @@ func encodeGRPC{{.Request.Name}}(_ context.Context, request interface{}) (interf
 func encodeGRPC{{.Response.Name}}(_ context.Context, response interface{}) (interface{}, error) {
 	resp := response.(*{{$servicePackageName}}.{{.Response.Name}})
 	return &{{$protobufPackageName}}.{{.Response.Name}}{
-            {{GenerateAssignmentSegment .Response $requestAndResponseList "resp"}}
+            {{$alias := NewObjectAlias "resp" $servicePackageName .Response.Name true}}
+            {{GenerateAssignmentSegment .Response $requestAndResponseList $alias}}
         }, nil
 }
 {{end}}
@@ -193,7 +197,7 @@ func NewHTTPHandler(opts ...Option) http.Handler {
 
 	m := http.NewServeMux()
 {{range $index, $method := .ServiceMethods}}
-	m.Handle("/{{ToLower $method.Name}}", httptransport.NewServer(
+	m.Handle("/{{ToLowerFirstCamelCase $method.Name}}", httptransport.NewServer(
 		options.endpoints.{{$method.Name}}Endpoint.Do,
 		decodeHTTP{{$method.Name}}Request,
 		encodeHTTPGenericResponse,
@@ -220,20 +224,20 @@ func NewHTTPClient(instance string, opts ...ClientOption) ({{$servicePackageName
 	options := newClientOption(opts...)
 
 {{range $index, $method := .ServiceMethods}}
-	var {{ToLower $method.Name}}Wrapper spiderconn.EndpointWrapper
+	var {{ToLowerFirstCamelCase $method.Name}}Wrapper spiderconn.EndpointWrapper
 	{
 		method := "{{$method.Name}}"
-		{{ToLower $method.Name}}Endpoint := httptransport.NewClient(
+		{{ToLowerFirstCamelCase $method.Name}}Endpoint := httptransport.NewClient(
 			"POST",
-			copyURL(u, "/{{ToLower $method.Name}}"),
+			copyURL(u, "/{{ToLowerFirstCamelCase $method.Name}}"),
 			encodeHTTPGenericRequest,
 			decodeHTTP{{$method.Name}}Response,
 			append(options.httpClientOptions, httptransport.ClientBefore(opentracing.ContextToHTTP(options.otTracer, options.logger)))...,
 		).Endpoint()
 		for _, middlewareCreator := range options.middlewareCreators {
-			{{ToLower $method.Name}}Endpoint = middlewareCreator(method)({{ToLower $method.Name}}Endpoint)
+			{{ToLowerFirstCamelCase $method.Name}}Endpoint = middlewareCreator(method)({{ToLowerFirstCamelCase $method.Name}}Endpoint)
 		}
-		{{ToLower $method.Name}}Wrapper = spiderconn.NewWrapper(method, {{ToLower $method.Name}}Endpoint)
+		{{ToLowerFirstCamelCase $method.Name}}Wrapper = spiderconn.NewWrapper(method, {{ToLowerFirstCamelCase $method.Name}}Endpoint)
 	}
 {{end}}
 	// Returning the endpoint.Set as a service.Service relies on the
@@ -241,7 +245,7 @@ func NewHTTPClient(instance string, opts ...ClientOption) ({{$servicePackageName
 	// of glue code.
 	return addendpoint.Set{
 {{range $index, $method := .ServiceMethods}}
-		{{$method.Name}}Endpoint: {{ToLower $method.Name}}Wrapper,
+		{{$method.Name}}Endpoint: {{ToLowerFirstCamelCase $method.Name}}Wrapper,
 {{end}}
 	}, nil
 }

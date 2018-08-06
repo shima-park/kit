@@ -608,8 +608,11 @@ func (t *concreteSyntaxTree) parseReferencePackage(pkg string) {
 					}
 
 					t2 := newConcreteSyntaxTree(fset, f)
-					t2.Parse()
-					t.copyStructMap(t2)
+					err = t2.Parse()
+					if err != nil {
+						panic(err)
+					}
+					t.mergeStructMap(t2)
 				}
 			}
 			break
@@ -617,7 +620,7 @@ func (t *concreteSyntaxTree) parseReferencePackage(pkg string) {
 	}
 }
 
-func (t *concreteSyntaxTree) copyStructMap(t2 *concreteSyntaxTree) *concreteSyntaxTree {
+func (t *concreteSyntaxTree) mergeStructMap(t2 *concreteSyntaxTree) *concreteSyntaxTree {
 
 	// 将a2建立的结构集合合并到主的AST StructMap中
 	if t.structMap[t2.packageName] == nil {
