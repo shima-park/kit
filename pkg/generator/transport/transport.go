@@ -131,6 +131,7 @@ func (g *AssignmentGeneratorFactory) Generate(dst *cst.Struct, srcs []gen.ReqAnd
 	return ""
 }
 
+// 赋值方法生成器
 type AssignmentGenerator struct {
 	cst           cst.ConcreteSyntaxTree
 	pbcst         cst.ConcreteSyntaxTree
@@ -140,14 +141,16 @@ type AssignmentGenerator struct {
 	referenceType map[string]struct{} // key: [struct.Name or type.Name] val: struct{}{}
 }
 
-// TODO 两种别名处理，判断指针为空
 type Alias interface {
 	CheckNil() (statement string, isNeed bool)
 	String() string
 	IsStar() bool
 	With(sub string) Alias
+	ReplaceName(name string) Alias
+	ReplaceRootStruct(s *cst.Struct) Alias
 }
 
+// 简单别名实现，这个目前用在map或者slice时,赋值的方法创建的临时变量
 type SimpleAlias struct {
 	name string
 }
@@ -173,6 +176,19 @@ func (sa SimpleAlias) With(sub string) Alias {
 	return sa
 }
 
+func (sa SimpleAlias) ReplaceName(name string) Alias {
+	sa.name = name
+	return sa
+}
+
+func (sa SimpleAlias) ReplaceRootStruct(s *cst.Struct) Alias {
+	return sa
+}
+
+// 对象别名实现，创建时传入根别名，是否是指针类型，及别名的对象数据结构
+// 往下传递时，通过With增加 例如当alias.name=resp 向下引用 resp.Data = alias.With("Data")
+// 生成检查空指针方法时，通过遍历rootStruct字段和分割的alias对应的字段，
+// 通过csts数组查找Struct并获取其类型，判断是否需要生成检查空指针方法
 type ObjectAlias struct {
 	name       string
 	csts       []cst.ConcreteSyntaxTree
@@ -195,33 +211,56 @@ func NewObjectAlias(csts ...cst.ConcreteSyntaxTree) func(name string, pkg, struc
 	}
 }
 
+// 生成检查别名引用是否为空指针的方法申明
+// resp.Data.Name
+// if resp != nil && resp.Data != nil {...}
 func (oa ObjectAlias) CheckNil() (statement string, isNeed bool) {
 	aliases := strings.Split(oa.name, ".")
 	concat := []string{}
 	conditions := []string{}
+	pkg := oa.rootStruct.PackageName
 	tempStruct := oa.rootStruct
 	for i, alias := range aliases {
+		// concat 需要拼接当前遍历的引用项
+		// 例如A.B.C.D
+		// concat: 第一次1. A 第二次2. A.B
+		// conditions: 1. A != nil  2. A != nil && A.B != nil
+		concat = append(concat, alias)
+		// 通过.切割获得的resp，无法知道其类型，只能从创建alias时就获取它的信息
+		// 例如resp.Data.Name中的resp,在创建时获知其是不是一个指针类型
 		if i == 0 {
 			if oa.isStar {
-				concat = append(concat, alias)
 				conditions = append(conditions, fmt.Sprintf(" %s != nil ", strings.Join(concat, ".")))
 			}
 		} else {
 			for _, field := range tempStruct.Fields {
-				if field.Name == alias {
-					pkg := oa.rootStruct.PackageName
-					typeName := field.Type.Name
-					typeStruct, found := findStruct(pkg, typeName, oa.csts...)
+				// 获取当前匹配的别名使用字段,非当前别名引用字段跳过
+				if field.Name != alias {
+					continue
+				}
+				// 获取到深层次的数据类型
+				fieldType := field.Type.BaseType
+				if field.Type.ElementType != nil {
+					fieldType = *field.Type.ElementType
+				} else if field.Type.ValueType != nil {
+					fieldType = *field.Type.ValueType
+				}
+
+				// 如果时指针类型，拼接到条件列表里
+				if field.Type.Star {
+					conditions = append(conditions, fmt.Sprintf(" %s != nil ", strings.Join(concat, ".")))
+				}
+
+				// 引用到基础类型的指针*int,*string,*float...不需要再向下找引用的数据结构
+				if fieldType.GoType == cst.BasicType {
+					continue
+				} else {
+					// 通过packagename和字段的类型名从关联的strcutmap中查找对应的数据结构
+					typeStruct, found := findStruct(pkg, fieldType.Name, oa.csts...)
 					if found {
 						tempStruct = typeStruct
 					} else {
-						panic(fmt.Sprintf("not found struct(%s.%s)", pkg, typeName))
-					}
-
-					concat = append(concat, field.Name)
-
-					if field.Type.Star {
-						conditions = append(conditions, fmt.Sprintf(" %s != nil ", strings.Join(concat, ".")))
+						panic(fmt.Sprintf("not found struct(%s)", fieldType.String()))
 					}
 				}
 			}
@@ -245,6 +284,16 @@ func (oa ObjectAlias) IsStar() bool {
 
 func (oa ObjectAlias) With(sub string) Alias {
 	oa.name += "." + sub
+	return oa
+}
+
+func (oa ObjectAlias) ReplaceName(name string) Alias {
+	oa.name = name
+	return oa
+}
+
+func (oa ObjectAlias) ReplaceRootStruct(s *cst.Struct) Alias {
+	oa.rootStruct = s
 	return oa
 }
 
@@ -283,181 +332,278 @@ func (g *AssignmentGenerator) findStruct(packageName string, structName string) 
 	return nil
 }
 
+// 生成转换基本类型的方法体
+func (g *AssignmentGenerator) generateBasicTypeAssignmentConvertFunc(srcAlias Alias, src cst.Field, dst cst.Field) {
+	var (
+		srcType   = src.Type.BaseType
+		dstType   = dst.Type.BaseType
+		aliasName = srcAlias.String()
+	)
+	// 数组类型进行基本数据类型转换时，需要取出ElementType
+	if dst.Type.ElementType != nil {
+		srcType = *src.Type.ElementType
+		dstType = *dst.Type.ElementType
+	}
+	if srcType.Name == dstType.Name {
+		if srcType.Star && !dstType.Star {
+			// F float64    req.F *float64
+			// F: *req.F,
+			if statement, isNeed := srcAlias.CheckNil(); isNeed {
+				g.print("func() (i %s) { if %s && %s != nil { i = *%s } ; return i }()",
+					dstType, statement, aliasName, aliasName)
+			} else {
+				g.print("func() (i %s) { return *%s }()",
+					dstType, aliasName)
+			}
+
+		} else if !srcType.Star && dstType.Star {
+			// F *float64   req.F float64
+			// F: &req.F,
+			if statement, isNeed := srcAlias.CheckNil(); isNeed {
+				g.print("func() (i %s) { if %s { i = &%s } ; return i }()",
+					dstType, statement, aliasName)
+			} else {
+				g.print("func() (i %s) { return &%s }()",
+					dstType, aliasName)
+			}
+		} else {
+			// Message string    resp.Message string
+			//Message: resp.Message,
+			if statement, isNeed := srcAlias.CheckNil(); isNeed {
+				g.print("func() (i %s) { if %s { i = %s } ; return i }()",
+					dstType, statement, aliasName)
+			} else {
+				g.print("func() (i %s) { return %s }()",
+					dstType, aliasName)
+			}
+		}
+	} else {
+		if srcType.Star && !dstType.Star {
+			// T int64  req.T *int
+			// T: int64(*req.T),
+			if statement, isNeed := srcAlias.CheckNil(); isNeed {
+				fmt.Println("---=====", statement, isNeed)
+				g.print("func() (i %s) { if %s { i = %s(*%s) } ; return i }()",
+					dstType, statement, dstType.Name, aliasName)
+			} else {
+				g.print("func() (i %s) { return %s(*%s) }()",
+					dstType, dstType.Name, aliasName)
+			}
+		} else if !srcType.Star && dstType.Star {
+			// Y *int64    req.Y int
+			// Y: func(i int) *int64 { return &i }(req.Y),
+			if statement, isNeed := srcAlias.CheckNil(); isNeed {
+				g.print("func() (i %s) { if %s { k := %s(%s);i = &k } ; return i }()",
+					dstType, statement, dstType.Name, aliasName)
+			} else {
+				g.print("func() (i %s) { k := %s(%s);i = &k ; return i }()",
+					dstType, dstType.Name, aliasName)
+			}
+		} else {
+			// Code int64  resp.Code int
+			// Code: int64(resp.Code),
+			if statement, isNeed := srcAlias.CheckNil(); isNeed {
+				g.print("func() (i %s) { if %s { i = %s(%s) } ; return i }()",
+					dstType, statement, dstType.Name, aliasName)
+			} else {
+				g.print("func() (i %s) { return %s(%s) }()",
+					dstType, dstType.Name, aliasName)
+			}
+		}
+	}
+	return
+}
+
+// 生成结构体转换的方法体
+func (g *AssignmentGenerator) generateStructTypeAssignmentConvertFunc(srcAlias Alias, src, dst cst.Field, srcStruct, dstStruct *cst.Struct) {
+	var (
+		dstType = dst.Type.BaseType
+		srcType = src.Type.BaseType
+	)
+	if dst.Type.ElementType != nil {
+		// 当前父类型是数组时
+		dstType = *dst.Type.ElementType
+		srcType = *src.Type.ElementType
+	} else if dst.Type.ValueType != nil {
+		// 当前父类型是map时
+		dstType = *dst.Type.ValueType
+		srcType = *src.Type.ValueType
+	}
+
+	dstType.X = dstStruct.PackageName
+	srcType.X = srcStruct.PackageName
+	g.println("func(src %s) (dst %s) {", srcType.String(), dstType.String())
+	{
+		// 这里生成赋值方法的需要重新生成别名对象，需要从当前的src,dst信息中生成
+		newAlias := NewObjectAlias(g.cst, g.pbcst)(
+			"src",
+			srcStruct.PackageName,
+			srcStruct.Name,
+			srcType.Star,
+		)
+		// 判断是否需要生成别名.字段名时的nil pointer检查语句
+		statement, isNeed := newAlias.CheckNil()
+		if isNeed {
+			g.println("if %s {", statement)
+		}
+
+		{
+			if dstType.Star {
+				removeStarType := dstType
+				removeStarType.Star = false
+				g.println("dst = &%s{", removeStarType.String())
+			} else {
+				g.println("dst = %s{", dstType.String())
+			}
+			for _, srcField := range srcStruct.Fields {
+				for _, dstField := range dstStruct.Fields {
+					if srcField.Name == dstField.Name {
+						g.generateAssignmentSegment(
+							newAlias,
+							srcField,
+							dstField,
+						)
+					}
+				}
+			}
+			g.println("}")
+		}
+
+		if isNeed {
+			g.println("}")
+		}
+	}
+	g.print("; return dst}(%s)", srcAlias.String())
+	return
+}
+
 func (g *AssignmentGenerator) generateAssignmentSegment(srcAlias Alias, src cst.Field, dst cst.Field) {
 	switch dst.Type.GoType {
 	case cst.BasicType:
-		if src.Type.Name == dst.Type.Name {
-			if src.Type.Star && !dst.Type.Star {
-				// F float64    req.F *float64
-				// F: *req.F,
-				if statement, isNeed := srcAlias.CheckNil(); isNeed {
-					g.println("%s: func() (i %s) { if %s && %s.%s != nil { i = *%s.%s } ; return i }(),",
-						dst.Name, dst.Type.String(), statement, srcAlias, src.Name, srcAlias, src.Name)
-				} else {
-					g.println("%s: func() (i %s) { return *%s.%s } (),",
-						dst.Name, dst.Type.String(), srcAlias, src.Name)
-				}
-
-			} else if !src.Type.Star && dst.Type.Star {
-				// F *float64   req.F float64
-				// F: &req.F,
-				if statement, isNeed := srcAlias.CheckNil(); isNeed {
-					g.println("%s: func() (i %s) { if %s { i = &%s.%s } ; return i }(),",
-						dst.Name, dst.Type.String(), statement, srcAlias, src.Name)
-				} else {
-					g.println("%s: func() (i %s) { return &%s.%s }(),",
-						dst.Name, dst.Type.String(), srcAlias, src.Name)
-				}
-			} else {
-				// Message string    resp.Message string
-				//Message: resp.Message,
-				if statement, isNeed := srcAlias.CheckNil(); isNeed {
-					g.println("%s: func() (i %s) { if %s { i = %s.%s } ; return i }(),",
-						dst.Name, dst.Type.String(), statement, srcAlias, src.Name)
-				} else {
-					g.println("%s: func() (i %s) { return %s.%s }(),",
-						dst.Name, dst.Type.String(), srcAlias, src.Name)
-				}
-			}
-		} else {
-			if src.Type.Star && !dst.Type.Star {
-				// T int64  req.T *int
-				// T: int64(*req.T),
-				if statement, isNeed := srcAlias.CheckNil(); isNeed {
-					g.println("%s: func() (i %s) { if %s && %s.%s != nil { i = %s(*%s.%s) } ; return i }(),",
-						dst.Name, dst.Type.String(), statement, srcAlias, src.Name, dst.Type.Name, srcAlias, src.Name)
-				} else {
-					g.println("%s: func() (i %s) { return %s(*%s.%s) }(),",
-						dst.Name, dst.Type.String(), dst.Type.Name, srcAlias, src.Name)
-				}
-			} else if !src.Type.Star && dst.Type.Star {
-				// Y *int64    req.Y int
-				// Y: func(i int) *int64 { return &i }(req.Y),
-				if statement, isNeed := srcAlias.CheckNil(); isNeed {
-					g.println("%s: func() (i %s) { if %s { k := %s(%s.%s);i = &k } ; return i }(),",
-						dst.Name, dst.Type.String(), statement, dst.Type.Name, srcAlias, src.Name)
-				} else {
-					g.println("%s: func() (i %s) { k := %s(%s.%s);i = &k ; return i }(),",
-						dst.Name, dst.Type.String(), dst.Type.Name, srcAlias, src.Name)
-				}
-			} else {
-				// Code int64  resp.Code int
-				// Code: int64(resp.Code),
-				if statement, isNeed := srcAlias.CheckNil(); isNeed {
-					g.println("%s: func() (i %s) { if %s { i = %s(%s.%s) } ; return i }(),",
-						dst.Name, dst.Type.String(), statement, dst.Type.Name, srcAlias, src.Name)
-				} else {
-					g.println("%s: func() (i %s) { return %s(%s.%s) }(),",
-						dst.Name, dst.Type.String(), dst.Type.Name, srcAlias, src.Name)
-				}
-			}
+		g.print("%s: ", dst.Name)
+		if dst.Name == "C" {
+			fmt.Println("----------", srcAlias.With(src.Name))
 		}
-
+		g.generateBasicTypeAssignmentConvertFunc(srcAlias.With(src.Name), src, dst)
+		g.println(",")
+	case cst.StructType:
+		var (
+			srcType = src.Type.BaseType
+			dstType = dst.Type.BaseType
+		)
+		if dst.Type.ElementType != nil {
+			srcType = *src.Type.ElementType
+			dstType = *dst.Type.ElementType
+		}
+		// 寻找类型的数据结构
+		srcStruct := g.findStruct(g.src.PackageName, srcType.Name)
+		dstStruct := g.findStruct(g.dst.PackageName, dstType.Name)
+		g.print("%s: ", dst.Name)
+		g.generateStructTypeAssignmentConvertFunc(srcAlias.With(src.Name), src, dst, srcStruct, dstStruct)
+		g.println(",")
 	case cst.ArrayType:
 		switch dst.Type.ElementType.GoType {
 		case cst.BasicType:
-			if src.Type.Name == dst.Type.Name {
-				if src.Type.Star == dst.Type.Star {
-					g.println("%s: %s.%s,", dst.Name, srcAlias, src.Name)
-					return
-				}
+			// 基础类型相同的数组直接赋值，不需要转换
+			// []string = []string, []int = []int ...
+			if src.Type.Name == dst.Type.Name &&
+				src.Type.Star == dst.Type.Star {
+				g.println("%s: %s.%s,", dst.Name, srcAlias, src.Name)
+				return
 			}
-		default:
+
+			// 属于基础类型，但是互相转换的类型或者指针类型不对时
+			// 生成方法转换, 例如[]int > []int64, []*int > []int
+
+			// 从父级别名新增引用
+			srcAlias = srcAlias.With(src.Name)
+			g.println("%s: func(src %s) (dst %s) {", dst.Name, src.Type.String(), dst.Type.String())
+			{
+				g.println("dst = make( %s, len(src))", dst.Type.String())
+				g.println("for i, v := range src{")
+				{
+					g.print("dst[i] = ")
+					g.generateBasicTypeAssignmentConvertFunc(
+						NewSimpleAlias("v"),
+						src,
+						dst,
+					)
+					g.println("")
+				}
+				g.println("}")
+				g.println("return")
+			}
+			g.println("}(%s),", srcAlias)
+		case cst.StructType:
+			// 数组的值是对象类型，生成转换方法
 			srcStruct := g.findStruct(g.src.PackageName, src.Type.ElementType.Name)
 			dstStruct := g.findStruct(g.dst.PackageName, dst.Type.ElementType.Name)
 
 			src.Type.ElementType.X = srcStruct.PackageName
 			dst.Type.ElementType.X = dstStruct.PackageName
+			// 从父级别名新增引用
+			srcAlias = srcAlias.With(src.Name)
 			g.println("%s: func(src %s) (dst %s) {", dst.Name, src.Type.String(), dst.Type.String())
-			g.println("dst = make( %s, len(src))", dst.Type.String())
-			g.println("for i, v := range src{")
-			g.print("dst[i] = ")
-
-			if dst.Type.ElementType.Star {
-				removeStarType := dst.Type.ElementType
-				removeStarType.Star = false
-				g.println("&%s{", removeStarType.String())
-			} else {
-				g.println("%s{", dst.Type.ElementType.String())
-			}
-			for _, srcField := range srcStruct.Fields {
-				for _, dstField := range dstStruct.Fields {
-					if srcField.Name == dstField.Name {
-						g.generateAssignmentSegment(NewSimpleAlias("v"), srcField, dstField)
-					}
+			{
+				g.println("dst = make( %s, len(src))", dst.Type.String())
+				g.println("for i, v := range src{")
+				{
+					g.print("dst[i] = ")
+					g.generateStructTypeAssignmentConvertFunc(
+						srcAlias.ReplaceName("v"),
+						src,
+						dst,
+						srcStruct,
+						dstStruct,
+					)
+					g.println("")
 				}
+				g.println("}")
+				g.println("return")
 			}
-			g.println("}")
-
-			g.println("}")
-			g.println("return")
-			g.println("}(%s),", fmt.Sprintf("%s.%s", srcAlias, src.Name))
+			g.println("}(%s),", srcAlias)
+		default:
+			panic("unsupport type" + dst.Type.String())
 		}
 	case cst.MapType:
 		switch dst.Type.ValueType.GoType {
 		case cst.BasicType:
+			// 基础类型相同的map直接赋值，不需要转换
+			// map[string]string = map[string]string
 			if src.Type.Name == dst.Type.Name &&
 				src.Type.Star == dst.Type.Star {
 				g.println("%s: %s.%s,", dst.Name, srcAlias, src.Name)
 			}
-		default:
+		case cst.StructType:
+			// map的值是对象类型，生成转换方法
 			srcStruct := g.findStruct(g.src.PackageName, src.Type.ValueType.Name)
 			dstStruct := g.findStruct(g.dst.PackageName, dst.Type.ValueType.Name)
 
 			src.Type.ValueType.X = srcStruct.PackageName
 			dst.Type.ValueType.X = dstStruct.PackageName
+			// 从父级别名新增引用
+			srcAlias = srcAlias.With(src.Name)
 			g.println("%s: func(src %s) (dst %s) {", dst.Name, src.Type.String(), dst.Type.String())
-			g.println("dst = make(%s, len(src))", dst.Type.String())
-			g.println("for k, v := range src{")
-			g.print("dst[k] = ")
-
-			if dst.Type.ValueType.Star {
-				removeStarType := dst.Type.ValueType
-				removeStarType.Star = false
-				g.println("&%s{", removeStarType.String())
-			} else {
-				g.println("%s{", dst.Type.ValueType.String())
-			}
-
-			for _, srcField := range srcStruct.Fields {
-				for _, dstField := range dstStruct.Fields {
-					if srcField.Name == dstField.Name {
-						g.generateAssignmentSegment(NewSimpleAlias("v"), srcField, dstField)
-					}
+			{
+				g.println("dst = make(%s, len(src))", dst.Type.String())
+				g.println("for k, v := range src{")
+				{
+					g.print("dst[k] =")
+					g.generateStructTypeAssignmentConvertFunc(
+						srcAlias.ReplaceName("v"),
+						src,
+						dst,
+						srcStruct,
+						dstStruct,
+					)
 				}
+				g.println("}")
+				g.println("return")
 			}
-			g.println("}")
-
-			g.println("}")
-			g.println("return")
-			//)return &i }(%s.%s),", dst.Name, src.Type.Name, dst.Type.String(), fmt.Sprintf("%s.%s", srcAlias, src.Name), src.Name)
-			g.println("}(%s),", fmt.Sprintf("%s.%s", srcAlias, src.Name))
+			g.println("}(%s),", srcAlias)
+		default:
+			panic("unsupport type" + dst.Type.String())
 		}
-	case cst.StructType:
-		if src.Type.Name == dst.Type.Name {
-			srcStruct := g.findStruct(g.src.PackageName, src.Type.Name)
-			dstStruct := g.findStruct(g.dst.PackageName, dst.Type.Name)
-			dst.Type.X = dstStruct.PackageName
-
-			if dst.Type.Star {
-				removeStarType := dst.Type
-				removeStarType.Star = false
-				g.println("%s: &%s{", dst.Name, removeStarType.String())
-			} else {
-				g.println("%s: %s{", dst.Name, dst.Type.String())
-			}
-
-			for _, srcField := range srcStruct.Fields {
-				for _, dstField := range dstStruct.Fields {
-					if srcField.Name == dstField.Name {
-						g.generateAssignmentSegment(srcAlias.With(src.Name), srcField, dstField)
-					}
-				}
-			}
-			g.println("},")
-
-		}
-
 	}
 }
 

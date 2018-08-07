@@ -481,14 +481,14 @@ func (t *concreteSyntaxTree) getFieldType(expr ast.Expr, structName string) Type
 		typ.X = st.X
 		typ.Name = "[]" + st.String()
 		typ.GoType = ArrayType
-		typ.ElementType = st.BaseType
+		typ.ElementType = &st.BaseType
 	case *ast.MapType:
 		keyType := t.getFieldType(ex.Key, structName)
 		valType := t.getFieldType(ex.Value, structName)
 		typ.Name = fmt.Sprintf("map[%s]%s", keyType.String(), valType.String())
 		typ.GoType = MapType
-		typ.KeyType = keyType.BaseType
-		typ.ValueType = valType.BaseType
+		typ.KeyType = &keyType.BaseType
+		typ.ValueType = &valType.BaseType
 	case *ast.StructType:
 		// XXX_NoUnkeyedLiteral struct{} `json:"-"`
 		//fmt.Println("----", ex, t.fset.Position(ex.Pos()))

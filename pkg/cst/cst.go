@@ -113,10 +113,10 @@ var (
 type Type struct {
 	BaseType
 
-	ElementType BaseType
+	ElementType *BaseType
 
-	KeyType   BaseType
-	ValueType BaseType
+	KeyType   *BaseType
+	ValueType *BaseType
 }
 
 type BaseType struct {
