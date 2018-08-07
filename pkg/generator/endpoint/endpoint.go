@@ -63,6 +63,9 @@ func (g *EndpointGenerator) Generate() error {
 			"ServiceMethods":    serviceIface.Methods,
 			"ServiceImportPath": utils.GetServiceImportPath(g.opts.baseServiceName),
 		})
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -23,16 +23,42 @@ import (
 	"google.golang.org/grpc"
 )
 
-func New(opts ...Option) ({{$servicePackageName}}.{{.ServiceName}}, error) {
+func New(opts ...Option) (addservice.AddService, error) {
 	var options Options
 	options = newOptions(opts...)
 
-	switch {
-	case options.grpcAddr != "":
+	switch options.transport {
+	case spiderconn.TransportTypeGRPC:
 		return newGrpcClient(options.grpcAddr, options.middlewareCreators)
-	case options.httpAddr != "":
+	case spiderconn.TransportTypeHTTP:
 		return newHTTPClient(options.httpAddr, options.middlewareCreators)
-	case options.consulAddr != "":
+	default:
+		options.transport = spiderconn.DefaultTransport
+
+		if options.instancer == nil &&
+			options.grpcAddr == "" && options.httpAddr == "" {
+
+			if options.consulAddr == "" {
+				options.consulAddr = spiderconn.DefaultConsulAddress
+			}
+
+			var err error
+			options.instancer, err = spiderconn.NewConsulSDInstancer(
+				options.consulAddr,
+				options.logger,
+				options.serviceName,
+				[]string{options.transport, options.version},
+			)
+			if err != nil {
+				options.logger.Log(
+					"service", options.serviceName,
+					"consul", options.consulAddr,
+					"transport", options.transport,
+					"err", err)
+				return nil, err
+			}
+		}
+
 		return newSDClient(
 			options.logger,
 			options.instancer,
@@ -42,7 +68,6 @@ func New(opts ...Option) ({{$servicePackageName}}.{{.ServiceName}}, error) {
 		)
 
 	}
-	return nil, errors.New("Unknown client options")
 }
 
 func newGrpcClient(addr string, middlewareCreators []middleware.Creator) ({{$servicePackageName}}.{{.ServiceName}}, error) {
@@ -75,9 +100,9 @@ func newSDClient(logger log.Logger, instancer sd.Instancer, transport, svcName s
 		factoryFor func(makeEndpoint func({{$servicePackageName}}.{{.ServiceName}}) spiderconn.EndpointWrapper) sd.Factory
 	)
 	switch transport {
-	case "grpc":
+	case spiderconn.TransportTypeGRPC:
 		factoryFor = grpcFactoryFor
-	case "http":
+	case spiderconn.TransportTypeHTTP:
 		factoryFor = httpFactoryFor
 	default:
 		return nil, errors.New("Unsupport transport:" + transport)
@@ -91,8 +116,9 @@ func newSDClient(logger log.Logger, instancer sd.Instancer, transport, svcName s
 	endpointer := sd.NewEndpointer(instancer, factory, logger)
 	balancer := lb.NewRoundRobin(endpointer)
 	retry := lb.Retry(retryMax, retryTimeout, balancer)
+        {{ToLowerFirstCamelCase $method.Name}}Endpoint = retry
 	for _, middlewareCreator := range middlewareCreators {
-		{{ToLowerFirstCamelCase $method.Name}}Endpoint = middlewareCreator(method)(retry)
+		{{ToLowerFirstCamelCase $method.Name}}Endpoint = middlewareCreator(method)({{ToLowerFirstCamelCase $method.Name}}Endpoint)
 	}
 	endpoints.{{$method.Name}}Endpoint = spiderconn.NewWrapper(method, {{ToLowerFirstCamelCase $method.Name}}Endpoint)
         }
@@ -182,25 +208,6 @@ func newOptions(opts ...Option) Options {
 		options.logger = spiderconn.DefaultLogger
 	}
 
-	if options.instancer == nil &&
-		options.grpcAddr == "" && options.httpAddr == "" {
-		var err error
-		options.instancer, err = spiderconn.NewConsulSDInstancer(
-			options.consulAddr,
-			options.logger,
-			options.serviceName,
-			[]string{options.transport, options.version},
-		)
-		if err != nil {
-			options.logger.Log(
-				"service", options.serviceName,
-				"consul", options.consulAddr,
-				"transport", options.transport,
-				"err", err)
-			panic(err)
-		}
-	}
-
 	return options
 }
 
@@ -230,13 +237,13 @@ func WithVersion(version string) Option {
 
 func WithTransportGRPC() Option {
 	return func(o *Options) {
-		o.transport = "grpc"
+		o.transport = spiderconn.TransportTypeGRPC
 	}
 }
 
 func WithTransportHTTP() Option {
 	return func(o *Options) {
-		o.transport = "http"
+		o.transport = spiderconn.TransportTypeHTTP
 	}
 }
 
@@ -249,12 +256,14 @@ func WithConsulAddress(addr string) Option {
 func WithHTTPAddress(addr string) Option {
 	return func(o *Options) {
 		o.httpAddr = addr
+		WithTransportHTTP()(o)
 	}
 }
 
 func WithGrpcAddress(addr string) Option {
 	return func(o *Options) {
 		o.grpcAddr = addr
+		WithTransportGRPC()(o)
 	}
 }
 
@@ -314,20 +323,8 @@ func InitDefaultClient(opts ...Option) error {
 	return nil
 }
 
-func getDefaultTransportOption() Option {
-	var transportOption = WithTransportGRPC()
-	switch spiderconn.DefaultTransport {
-	case spiderconn.TransportTypeGRPC:
-		transportOption = WithTransportGRPC()
-	case spiderconn.TransportTypeHTTP:
-		transportOption = WithTransportHTTP()
-	}
-	return transportOption
-}
-
 func init() {
 	InitDefaultClient(
-		getDefaultTransportOption(),
 		WithConsulAddress(spiderconn.DefaultConsulAddress),
 		WithLogger(spiderconn.DefaultLogger),
 		WithMiddlewareCreator(

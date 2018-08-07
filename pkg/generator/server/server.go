@@ -53,6 +53,9 @@ func (g *ServerGenerator) Generate() error {
 			"ProtobufImportPath":  utils.GetProtobufImportPath(g.opts.baseServiceName),
 			"TransportImportPath": utils.GetTransportImportPath(g.opts.baseServiceName),
 		})
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }

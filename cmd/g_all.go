@@ -21,23 +21,44 @@ var allCmd = &cobra.Command{
 			return
 		}
 
-		cst, err := cst.New(sourceFile)
+		var (
+			genFuncs []GenerateFunc
+			ctree    cst.ConcreteSyntaxTree
+			err      error
+		)
+		if !utils.IsProtobufSourceFile(sourceFile) {
+			ctree, err = cst.New(sourceFile)
+			genFuncs = []GenerateFunc{
+				generateProtobuf,
+				generateEndpoint,
+				generateTransport,
+				generateServer,
+				generateClient,
+			}
+		} else {
+			pkg := viper.GetString("g_a_package")
+			if pkg == "" {
+				logrus.Error("You must provide a package name for generate code")
+				return
+			}
+			ctree, err = cst.New(
+				sourceFile,
+				cst.WithPackageName(pkg),
+			)
+			genFuncs = []GenerateFunc{
+				generateEndpoint,
+				generateTransport,
+				generateServer,
+				generateClient,
+			}
+		}
 		if err != nil {
 			logrus.Error(err)
 			return
 		}
 
-		serviceSuffix := utils.SelectServiceSuffix(sourceFile)
-		genFuncs := []GenerateFunc{
-			generateProtobuf,
-			generateEndpoint,
-			generateTransport,
-			generateServer,
-			generateClient,
-		}
-
 		for _, genFunc := range genFuncs {
-			if err = genFunc(cst, serviceSuffix); err != nil {
+			if err = genFunc(ctree, utils.SelectServiceSuffix(sourceFile)); err != nil {
 				logrus.Fatal(err)
 			}
 		}
@@ -49,5 +70,7 @@ func init() {
 	generateCmd.AddCommand(allCmd)
 
 	allCmd.Flags().StringP("source", "s", "", "Need to analyze the source file of ast")
+	allCmd.Flags().StringP("pkg", "p", "", "If you want to replace package of source file ")
+	viper.BindPFlag("g_a_package", allCmd.Flags().Lookup("pkg"))
 	viper.BindPFlag("g_a_source_file", allCmd.Flags().Lookup("source"))
 }

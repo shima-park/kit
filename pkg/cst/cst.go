@@ -43,7 +43,7 @@ type Field struct {
 	Tag  string
 }
 
-func New(filename string) (ConcreteSyntaxTree, error) {
+func New(filename string, opts ...Option) (ConcreteSyntaxTree, error) {
 	fset := token.NewFileSet()
 
 	f, err := parser.ParseFile(fset, filename, nil, 0)
@@ -54,6 +54,7 @@ func New(filename string) (ConcreteSyntaxTree, error) {
 	t := NewConcreteSyntaxTree(
 		fset,
 		f,
+		opts...,
 	)
 	if err := t.Parse(); err != nil {
 		return nil, err
@@ -72,7 +73,7 @@ func FieldsToString(fields []Field) string {
 	return buff.String()
 }
 
-func NewFieldsToString(separator string) func(fields []Field) string {
+func FieldsToStringFunc(separator string) func(fields []Field) string {
 	return func(fields []Field) string {
 		buff := bytes.NewBufferString("")
 		for i, field := range fields {
@@ -85,7 +86,7 @@ func NewFieldsToString(separator string) func(fields []Field) string {
 	}
 }
 
-func NewFieldsKeyToString(separator string) func(fields []Field) string {
+func FieldsKeyToStringFunc(separator string) func(fields []Field) string {
 	return func(fields []Field) string {
 		buff := bytes.NewBufferString("")
 		for i, field := range fields {

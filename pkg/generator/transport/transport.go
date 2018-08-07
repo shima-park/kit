@@ -43,7 +43,6 @@ func (g *TransportGenerator) Generate() error {
 			"ToLowerFirstCamelCase":     utils.ToLowerFirstCamelCase,
 			"ToCamelCase":               utils.ToCamelCase,
 			"BasePath":                  filepath.Base,
-			"ToLower":                   strings.ToLower,
 			"GenerateAssignmentSegment": NewAssignmentGeneratorFactory(g.cst, pbCST).Generate,
 			"NewSimpleAlias":            NewSimpleAlias,
 			"NewObjectAlias":            NewObjectAlias(g.cst, pbCST),
@@ -79,6 +78,9 @@ func (g *TransportGenerator) Generate() error {
 				"RequestAndResponseList": gen.GetRequestAndResponseList(pbCST),
 			},
 		})
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -349,8 +351,8 @@ func (g *AssignmentGenerator) generateBasicTypeAssignmentConvertFunc(srcAlias Al
 			// F float64    req.F *float64
 			// F: *req.F,
 			if statement, isNeed := srcAlias.CheckNil(); isNeed {
-				g.print("func() (i %s) { if %s && %s != nil { i = *%s } ; return i }()",
-					dstType, statement, aliasName, aliasName)
+				g.print("func() (i %s) { if %s { i = *%s } ; return i }()",
+					dstType, statement, aliasName)
 			} else {
 				g.print("func() (i %s) { return *%s }()",
 					dstType, aliasName)
@@ -516,11 +518,12 @@ func (g *AssignmentGenerator) generateAssignmentSegment(srcAlias Alias, src cst.
 			g.println("%s: func(src %s) (dst %s) {", dst.Name, src.Type.String(), dst.Type.String())
 			{
 				g.println("dst = make( %s, len(src))", dst.Type.String())
-				g.println("for i, v := range src{")
+				g.println("for i, _ := range src{")
 				{
+					g.println("temp := src[i]")
 					g.print("dst[i] = ")
 					g.generateBasicTypeAssignmentConvertFunc(
-						NewSimpleAlias("v"),
+						NewSimpleAlias("temp"),
 						src,
 						dst,
 					)
@@ -542,11 +545,12 @@ func (g *AssignmentGenerator) generateAssignmentSegment(srcAlias Alias, src cst.
 			g.println("%s: func(src %s) (dst %s) {", dst.Name, src.Type.String(), dst.Type.String())
 			{
 				g.println("dst = make( %s, len(src))", dst.Type.String())
-				g.println("for i, v := range src{")
+				g.println("for i, _ := range src{")
 				{
+					g.println("temp := src[i]")
 					g.print("dst[i] = ")
 					g.generateStructTypeAssignmentConvertFunc(
-						srcAlias.ReplaceName("v"),
+						srcAlias.ReplaceName("temp"),
 						src,
 						dst,
 						srcStruct,

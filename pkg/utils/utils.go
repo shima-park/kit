@@ -159,8 +159,12 @@ func GetProtobufServiceSuffix() string {
 	return viper.GetString("gk_protobuf_service_suffix")
 }
 
+func IsProtobufSourceFile(sourceFile string) bool {
+	return strings.HasSuffix(sourceFile, "pb.go")
+}
+
 func SelectServiceSuffix(sourceFile string) string {
-	if strings.HasSuffix(sourceFile, "pb.go") {
+	if IsProtobufSourceFile(sourceFile) {
 		return GetProtobufServiceSuffix()
 	}
 	return GetServiceSuffix()

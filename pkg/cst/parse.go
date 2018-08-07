@@ -67,6 +67,9 @@ func newConcreteSyntaxTree(fset *token.FileSet, file *ast.File, opts ...Option) 
 }
 
 func (t *concreteSyntaxTree) PackageName() string {
+	if t.opts.packageName != "" {
+		return t.opts.packageName
+	}
 	return t.packageName
 }
 

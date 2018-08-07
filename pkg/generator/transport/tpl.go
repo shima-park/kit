@@ -293,7 +293,7 @@ type errorWrapper struct {
 func decodeHTTP{{.Request.Name}}(_ context.Context, r *http.Request) (interface{}, error) {
 	var req addservice.{{.Request.Name}}
 	err := json.NewDecoder(r.Body).Decode(&req)
-	return req, err
+	return &req, err
 }
 {{end}}
 
@@ -309,7 +309,7 @@ func decodeHTTP{{.Response.Name}}(_ context.Context, r *http.Response) (interfac
 	}
 	var resp addservice.{{.Response.Name}}
 	err := json.NewDecoder(r.Body).Decode(&resp)
-	return resp, err
+	return &resp, err
 }
 {{end}}
 {{end}}
