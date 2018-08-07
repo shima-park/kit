@@ -382,7 +382,6 @@ func (g *AssignmentGenerator) generateBasicTypeAssignmentConvertFunc(srcAlias Al
 			// T int64  req.T *int
 			// T: int64(*req.T),
 			if statement, isNeed := srcAlias.CheckNil(); isNeed {
-				fmt.Println("---=====", statement, isNeed)
 				g.print("func() (i %s) { if %s { i = %s(*%s) } ; return i }()",
 					dstType, statement, dstType.Name, aliasName)
 			} else {
@@ -481,9 +480,6 @@ func (g *AssignmentGenerator) generateAssignmentSegment(srcAlias Alias, src cst.
 	switch dst.Type.GoType {
 	case cst.BasicType:
 		g.print("%s: ", dst.Name)
-		if dst.Name == "C" {
-			fmt.Println("----------", srcAlias.With(src.Name))
-		}
 		g.generateBasicTypeAssignmentConvertFunc(srcAlias.With(src.Name), src, dst)
 		g.println(",")
 	case cst.StructType:

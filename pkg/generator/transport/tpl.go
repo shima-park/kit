@@ -108,7 +108,7 @@ func NewGRPCClient(conn *grpc.ClientConn, opts ...ClientOption) {{$servicePackag
 {{range .RequestAndResponseList}}
 {{if .Request}}
 // decodeGRPC{{.Request.Name}} is a transport/grpc.DecodeRequestFunc that converts a
-// gRPC sum request to a user-domain sum request. Primarily useful in a server.
+// gRPC {{.Request.Name}} to a user-domain {{.Request.Name}}. Primarily useful in a server.
 func decodeGRPC{{.Request.Name}}(_ context.Context, grpcReq interface{}) (interface{}, error) {
 	req := grpcReq.(*{{$protobufPackageName}}.{{.Request.Name}})
         {{if not .Request}}_ = req{{end}}
@@ -121,7 +121,7 @@ func decodeGRPC{{.Request.Name}}(_ context.Context, grpcReq interface{}) (interf
 
 {{if .Response}}
 // decodeGRPC{{.Response.Name}} is a transport/grpc.DecodeResponseFunc that converts a
-// gRPC sum response to a user-domain sum response. Primarily useful in a client.
+// gRPC {{.Response.Name}} to a user-domain {{.Response.Name}}. Primarily useful in a client.
 func decodeGRPC{{.Response.Name}}(_ context.Context, grpcResponse interface{}) (interface{}, error) {
 	resp := grpcResponse.(*{{$protobufPackageName}}.{{.Response.Name}})
 	return &{{$servicePackageName}}.{{.Response.Name}}{
@@ -136,7 +136,7 @@ func decodeGRPC{{.Response.Name}}(_ context.Context, grpcResponse interface{}) (
 {{range .ProtobufCST.RequestAndResponseList}}
 {{if .Request}}
 // encodeGRPC{{.Request.Name}} is a transport/grpc.EncodeRequestFunc that converts a
-// user-domain sum request to a gRPC sum request. Primarily useful in a client.
+// user-domain {{.Request.Name}} to a gRPC {{.Request.Name}}. Primarily useful in a client.
 func encodeGRPC{{.Request.Name}}(_ context.Context, request interface{}) (interface{}, error) {
 	req := request.(*{{$servicePackageName}}.{{.Request.Name}})
         {{if not .Request}}_ = req{{end}}
@@ -149,7 +149,7 @@ func encodeGRPC{{.Request.Name}}(_ context.Context, request interface{}) (interf
 
 {{if .Response}}
 // encodeGRPC{{.Response.Name}} is a transport/grpc.EncodeResponseFunc that converts a
-// user-domain sum response to a gRPC sum response. Primarily useful in a server.
+// user-domain {{.Response.Name}} to a gRPC {{.Response.Name}}. Primarily useful in a server.
 func encodeGRPC{{.Response.Name}}(_ context.Context, response interface{}) (interface{}, error) {
 	resp := response.(*{{$servicePackageName}}.{{.Response.Name}})
 	return &{{$protobufPackageName}}.{{.Response.Name}}{
@@ -285,51 +285,34 @@ type errorWrapper struct {
 	Error string ` + "`json:\"error\"`" + `
 }
 
-// decodeHTTPSumRequest is a transport/http.DecodeRequestFunc that decodes a
-// JSON-encoded sum request from the HTTP request body. Primarily useful in a
+{{range .RequestAndResponseList}}
+{{if .Request}}
+// decodeHTTP{{.Request.Name}} is a transport/http.DecodeRequestFunc that decodes a
+// JSON-encoded {{.Request.Name}} from the HTTP request body. Primarily useful in a
 // server.
-func decodeHTTPSumRequest(_ context.Context, r *http.Request) (interface{}, error) {
-	var req addservice.SumRequest
+func decodeHTTP{{.Request.Name}}(_ context.Context, r *http.Request) (interface{}, error) {
+	var req addservice.{{.Request.Name}}
 	err := json.NewDecoder(r.Body).Decode(&req)
 	return req, err
 }
+{{end}}
 
-// decodeHTTPConcatRequest is a transport/http.DecodeRequestFunc that decodes a
-// JSON-encoded concat request from the HTTP request body. Primarily useful in a
-// server.
-func decodeHTTPConcatRequest(_ context.Context, r *http.Request) (interface{}, error) {
-	var req addservice.ConcatRequest
-	err := json.NewDecoder(r.Body).Decode(&req)
-	return req, err
-}
-
-// decodeHTTPSumResponse is a transport/http.DecodeResponseFunc that decodes a
-// JSON-encoded sum response from the HTTP response body. If the response has a
+{{if .Response}}
+// decodeHTTP{{.Response.Name}} is a transport/http.DecodeResponseFunc that decodes a
+// JSON-encoded {{.Response.Name}} from the HTTP response body. If the response has a
 // non-200 status code, we will interpret that as an error and attempt to decode
 // the specific error message from the response body. Primarily useful in a
 // client.
-func decodeHTTPSumResponse(_ context.Context, r *http.Response) (interface{}, error) {
+func decodeHTTP{{.Response.Name}}(_ context.Context, r *http.Response) (interface{}, error) {
 	if r.StatusCode != http.StatusOK {
 		return nil, errors.New(r.Status)
 	}
-	var resp addservice.SumResponse
+	var resp addservice.{{.Response.Name}}
 	err := json.NewDecoder(r.Body).Decode(&resp)
 	return resp, err
 }
-
-// decodeHTTPConcatResponse is a transport/http.DecodeResponseFunc that decodes
-// a JSON-encoded concat response from the HTTP response body. If the response
-// has a non-200 status code, we will interpret that as an error and attempt to
-// decode the specific error message from the response body. Primarily useful in
-// a client.
-func decodeHTTPConcatResponse(_ context.Context, r *http.Response) (interface{}, error) {
-	if r.StatusCode != http.StatusOK {
-		return nil, errors.New(r.Status)
-	}
-	var resp addservice.ConcatResponse
-	err := json.NewDecoder(r.Body).Decode(&resp)
-	return resp, err
-}
+{{end}}
+{{end}}
 
 // encodeHTTPGenericRequest is a transport/http.EncodeRequestFunc that
 // JSON-encodes any request to the request body. Primarily useful in a client.
