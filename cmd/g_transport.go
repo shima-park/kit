@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -30,13 +31,7 @@ var transportCmd = &cobra.Command{
 			return
 		}
 
-		cst, err := cst.New(sourceFile)
-		if err != nil {
-			logrus.Error(err)
-			return
-		}
-		serviceSuffix := utils.SelectServiceSuffix(sourceFile)
-		err = generateTransport(cst, serviceSuffix)
+		err := generateTransport(sourceFile)
 		if err != nil {
 			logrus.Error(err)
 			return
@@ -44,7 +39,12 @@ var transportCmd = &cobra.Command{
 	},
 }
 
-func generateTransport(cst cst.ConcreteSyntaxTree, serviceSuffix string) error {
+func generateTransport(sourceFile string) error {
+	cst, err := cst.New(sourceFile)
+	if err != nil {
+		return err
+	}
+	serviceSuffix := utils.SelectServiceSuffix(sourceFile)
 	baseServiceName := service.GetBaseServiceName(cst.PackageName(), serviceSuffix)
 	transportPath := utils.GetTransportFilePath(baseServiceName)
 	transportPackageName := filepath.Base(transportPath)
@@ -58,10 +58,9 @@ func generateTransport(cst cst.ConcreteSyntaxTree, serviceSuffix string) error {
 
 		file, err := createFile(filename)
 		if err != nil {
-			logrus.Error("Create file ", filename, " error:", err)
-			return err
+			return errors.New("Create file " + filename + " error:" + err.Error())
 		}
-		defer formatAndGoimports(filename)
+		defer GoimportsAndformat(filename)
 		defer file.Close()
 
 		options = append(options,
@@ -77,9 +76,8 @@ func generateTransport(cst cst.ConcreteSyntaxTree, serviceSuffix string) error {
 		options...,
 	)
 
-	err := gen.Generate()
+	err = gen.Generate()
 	if err != nil {
-		logrus.Error(err)
 		return err
 	}
 

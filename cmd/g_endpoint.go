@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -25,14 +26,7 @@ var endpointCmd = &cobra.Command{
 			return
 		}
 
-		cst, err := cst.New(sourceFile)
-		if err != nil {
-			logrus.Error(err)
-			return
-		}
-
-		serviceSuffix := utils.SelectServiceSuffix(sourceFile)
-		err = generateEndpoint(cst, serviceSuffix)
+		err := generateEndpoint(sourceFile)
 		if err != nil {
 			logrus.Error(err)
 			return
@@ -40,7 +34,13 @@ var endpointCmd = &cobra.Command{
 	},
 }
 
-func generateEndpoint(cst cst.ConcreteSyntaxTree, serviceSuffix string) error {
+func generateEndpoint(sourceFile string) error {
+	cst, err := cst.New(sourceFile)
+	if err != nil {
+		return err
+	}
+
+	serviceSuffix := utils.SelectServiceSuffix(sourceFile)
 	baseServiceName := service.GetBaseServiceName(cst.PackageName(), serviceSuffix)
 	endpointPath := utils.GetEndpointFilePath(baseServiceName)
 	endpointPackageName := filepath.Base(endpointPath)
@@ -54,10 +54,9 @@ func generateEndpoint(cst cst.ConcreteSyntaxTree, serviceSuffix string) error {
 
 		file, err := createFile(filename)
 		if err != nil {
-			logrus.Error("Create file ", filename, " error:", err)
-			return err
+			return errors.New("Create file " + filename + " error:" + err.Error())
 		}
-		defer formatAndGoimports(filename)
+		defer GoimportsAndformat(filename)
 		defer file.Close()
 
 		options = append(options,
@@ -73,9 +72,8 @@ func generateEndpoint(cst cst.ConcreteSyntaxTree, serviceSuffix string) error {
 		options...,
 	)
 
-	err := gen.Generate()
+	err = gen.Generate()
 	if err != nil {
-		logrus.Error(err)
 		return err
 	}
 

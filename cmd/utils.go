@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/smallnest/rpcx/log"
 	"github.com/spf13/viper"
+	"golang.org/x/tools/imports"
 )
 
 func createFile(filename string) (writerCloser io.WriteCloser, err error) {
@@ -55,30 +57,28 @@ func generateProtobufGo(protoPath string) error {
 	return nil
 }
 
-func formatAndGoimports(filepath string) {
+func GoimportsAndformat(filepath string) {
 	if err := goimports(filepath); err != nil {
 		logrus.Error("goimports filename:", filepath, "error:", err)
 	}
-
-	if err := gofmt(filepath); err != nil {
-		logrus.Error("gofmt filename:", filepath, "error:", err)
-	}
-}
-
-func gofmt(filepath string) error {
-	args := []string{
-		"-w", filepath,
-	}
-	cmd := exec.Command("gofmt", args...)
-	logrus.Info("gofmt ", strings.Join(args, " "))
-	return cmd.Run()
 }
 
 func goimports(filepath string) error {
-	args := []string{
-		"-w", filepath,
+	body, err := ioutil.ReadFile(filepath)
+	if err != nil {
+		return err
 	}
-	cmd := exec.Command("goimports", args...)
-	logrus.Info("goimports ", strings.Join(args, " "))
-	return cmd.Run()
+
+	// imports.Process中包含了format.Source
+	body, err = imports.Process(filepath, body, nil)
+	if err != nil {
+		return err
+	}
+
+	err = ioutil.WriteFile(filepath, body, 0644)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

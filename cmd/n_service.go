@@ -8,7 +8,6 @@ import (
 	"ezrpro.com/micro/kit/pkg/generator/service"
 	"ezrpro.com/micro/kit/pkg/utils"
 	"github.com/sirupsen/logrus"
-	"github.com/smallnest/rpcx/log"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -40,13 +39,12 @@ var serviceCmd = &cobra.Command{
 		}
 		for templateName, template := range service.TemplateMap {
 			filename := filepath.Join(servicePath, fmt.Sprintf("%s.go", templateName.String()))
-			log.Info("create file:", filename)
 			file, err := createFile(filename)
 			if err != nil {
 				logrus.Error(err)
 				return
 			}
-			defer formatAndGoimports(filename)
+			defer GoimportsAndformat(filename)
 			defer file.Close()
 
 			options = append(options,

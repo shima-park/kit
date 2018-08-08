@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -25,14 +26,7 @@ var serverCmd = &cobra.Command{
 			return
 		}
 
-		cst, err := cst.New(sourceFile)
-		if err != nil {
-			logrus.Error(err)
-			return
-		}
-
-		serviceSuffix := utils.SelectServiceSuffix(sourceFile)
-		err = generateServer(cst, serviceSuffix)
+		err := generateServer(sourceFile)
 		if err != nil {
 			logrus.Error(err)
 			return
@@ -40,7 +34,13 @@ var serverCmd = &cobra.Command{
 	},
 }
 
-func generateServer(cst cst.ConcreteSyntaxTree, serviceSuffix string) error {
+func generateServer(sourceFile string) error {
+	cst, err := cst.New(sourceFile)
+	if err != nil {
+		return err
+	}
+
+	serviceSuffix := utils.SelectServiceSuffix(sourceFile)
 	baseServiceName := service.GetBaseServiceName(cst.PackageName(), serviceSuffix)
 	serverPath := utils.GetServerFilePath(baseServiceName)
 	serverPackageName := filepath.Base(serverPath)
@@ -54,10 +54,9 @@ func generateServer(cst cst.ConcreteSyntaxTree, serviceSuffix string) error {
 
 		file, err := createFile(filename)
 		if err != nil {
-			logrus.Error("Create file ", filename, " error:", err)
-			return err
+			return errors.New("Create file " + filename + " error:" + err.Error())
 		}
-		defer formatAndGoimports(filename)
+		defer GoimportsAndformat(filename)
 		defer file.Close()
 
 		options = append(options,
@@ -73,7 +72,7 @@ func generateServer(cst cst.ConcreteSyntaxTree, serviceSuffix string) error {
 		options...,
 	)
 
-	err := gen.Generate()
+	err = gen.Generate()
 	if err != nil {
 		logrus.Error(err)
 		return err

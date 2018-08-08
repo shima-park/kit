@@ -21,7 +21,7 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.PersistentFlags().BoolP("debug", "d", false, "If you want to se the debug logs.")
+	rootCmd.PersistentFlags().BoolP("debug", "d", false, "If you want to see the debug logs.")
 	rootCmd.PersistentFlags().BoolP("force", "f", false, "Force overide existing files without asking.")
 	rootCmd.PersistentFlags().StringP("folder", "b", "", "If you want to specify the base folder of the project.")
 	viper.BindPFlag("gk_folder", rootCmd.PersistentFlags().Lookup("folder"))

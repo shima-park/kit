@@ -36,7 +36,7 @@ func (g *GeneratorFactory) Generate(dst *cst.Struct, srcs []gen.ReqAndResp, srcA
 	src := findAssignmentStruct(dst, srcs)
 	if src != nil {
 		buff := bytes.NewBufferString("")
-		n := &Generator{
+		n := &AssignmentGenerator{
 			pbcst:    g.pbcst,
 			cst:      g.cst,
 			dst:      dst,
@@ -55,7 +55,7 @@ func (g *GeneratorFactory) Generate(dst *cst.Struct, srcs []gen.ReqAndResp, srcA
 }
 
 // 赋值方法生成器
-type Generator struct {
+type AssignmentGenerator struct {
 	cst      cst.ConcreteSyntaxTree //
 	pbcst    cst.ConcreteSyntaxTree
 	writer   io.Writer
@@ -78,7 +78,7 @@ func findStruct(packageName string, structName string, csts ...cst.ConcreteSynta
 	return s, found
 }
 
-func (g *Generator) Generate() error {
+func (g *AssignmentGenerator) Generate() error {
 	for _, srcField := range g.src.Fields {
 		for _, dstField := range g.dst.Fields {
 			if srcField.Name == dstField.Name {
@@ -92,7 +92,7 @@ func (g *Generator) Generate() error {
 	return nil
 }
 
-func (g *Generator) findStruct(packageName string, structName string) *cst.Struct {
+func (g *AssignmentGenerator) findStruct(packageName string, structName string) *cst.Struct {
 	switch packageName {
 	case g.cst.PackageName():
 		return g.cst.StructMap()[packageName][structName]
@@ -103,7 +103,7 @@ func (g *Generator) findStruct(packageName string, structName string) *cst.Struc
 }
 
 // 生成转换基本类型的方法体
-func (g *Generator) generateBasicTypeAssignmentConvertFunc(srcAlias Alias, src cst.Field, dst cst.Field) {
+func (g *AssignmentGenerator) generateBasicTypeAssignmentConvertFunc(srcAlias Alias, src cst.Field, dst cst.Field) {
 	var (
 		srcType   = src.Type.BaseType
 		dstType   = dst.Type.BaseType
@@ -184,7 +184,7 @@ func (g *Generator) generateBasicTypeAssignmentConvertFunc(srcAlias Alias, src c
 }
 
 // 生成结构体转换的方法体
-func (g *Generator) generateStructTypeAssignmentConvertFunc(srcAlias Alias, src, dst cst.Field, srcStruct, dstStruct *cst.Struct) error {
+func (g *AssignmentGenerator) generateStructTypeAssignmentConvertFunc(srcAlias Alias, src, dst cst.Field, srcStruct, dstStruct *cst.Struct) error {
 	var (
 		dstType = dst.Type.BaseType
 		srcType = src.Type.BaseType
@@ -249,7 +249,7 @@ func (g *Generator) generateStructTypeAssignmentConvertFunc(srcAlias Alias, src,
 	return nil
 }
 
-func (g *Generator) generateAssignmentSegment(srcAlias Alias, src cst.Field, dst cst.Field) error {
+func (g *AssignmentGenerator) generateAssignmentSegment(srcAlias Alias, src cst.Field, dst cst.Field) error {
 	switch dst.Type.GoType {
 	case cst.BasicType:
 		g.print("%s: ", dst.Name)
@@ -385,10 +385,10 @@ func (g *Generator) generateAssignmentSegment(srcAlias Alias, src cst.Field, dst
 	return nil
 }
 
-func (g *Generator) print(format string, a ...interface{}) {
+func (g *AssignmentGenerator) print(format string, a ...interface{}) {
 	g.writer.Write([]byte(fmt.Sprintf(format, a...)))
 }
 
-func (g *Generator) println(format string, a ...interface{}) {
+func (g *AssignmentGenerator) println(format string, a ...interface{}) {
 	g.writer.Write([]byte(fmt.Sprintf(format+"\n", a...)))
 }

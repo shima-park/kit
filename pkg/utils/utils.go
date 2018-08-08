@@ -20,6 +20,7 @@ func SetDefaults() {
 	viper.SetDefault("gk_transport_path_format", "{{.Path}}/pkg/{{.ServiceName}}transport")
 	viper.SetDefault("gk_server_path_format", "{{.Path}}/pkg/{{.ServiceName}}server")
 	viper.SetDefault("gk_client_path_format", "{{.Path}}/pkg/{{.ServiceName}}client")
+	viper.SetDefault("gk_impl_path_format", "{{.Path}}/pkg/{{.ServiceName}}impl")
 	viper.SetDefault("gk_service_suffix", "Service")
 	viper.SetDefault("gk_protobuf_service_suffix", "Server")
 	viper.SetDefault("gk_request_suffix", "Request")
@@ -151,6 +152,10 @@ func getClientPath(path, serviceName string) string {
 	return getPath("gk_client_path_format", path, serviceName)
 }
 
+func getImplPath(path, serviceName string) string {
+	return getPath("gk_impl_path_format", path, serviceName)
+}
+
 func GetServiceSuffix() string {
 	return viper.GetString("gk_service_suffix")
 }
@@ -246,6 +251,12 @@ func GetServerFilePath(svc string) string {
 
 func GetClientFilePath(svc string) string {
 	return getClientPath(
+		GetPWD(),
+		svc)
+}
+
+func GetImplFilePath(svc string) string {
+	return getImplPath(
 		GetPWD(),
 		svc)
 }

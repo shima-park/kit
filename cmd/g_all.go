@@ -1,14 +1,12 @@
 package cmd
 
 import (
-	"ezrpro.com/micro/kit/pkg/cst"
-	"ezrpro.com/micro/kit/pkg/utils"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-type GenerateFunc func(cst cst.ConcreteSyntaxTree, serviceSuffix string) error
+type GenerateFunc func(sourceFile string) error
 
 var allCmd = &cobra.Command{
 	Use:     "all",
@@ -23,34 +21,14 @@ var allCmd = &cobra.Command{
 
 		var (
 			genFuncs []GenerateFunc
-			ctree    cst.ConcreteSyntaxTree
 			err      error
 		)
-		if !utils.IsProtobufSourceFile(sourceFile) {
-			ctree, err = cst.New(sourceFile)
-			genFuncs = []GenerateFunc{
-				generateProtobuf,
-				generateEndpoint,
-				generateTransport,
-				generateServer,
-				generateClient,
-			}
-		} else {
-			pkg := viper.GetString("g_a_package")
-			if pkg == "" {
-				logrus.Error("You must provide a package name for generate code")
-				return
-			}
-			ctree, err = cst.New(
-				sourceFile,
-				cst.WithPackageName(pkg),
-			)
-			genFuncs = []GenerateFunc{
-				generateEndpoint,
-				generateTransport,
-				generateServer,
-				generateClient,
-			}
+		genFuncs = []GenerateFunc{
+			generateProtobuf,
+			generateEndpoint,
+			generateTransport,
+			generateServer,
+			generateClient,
 		}
 		if err != nil {
 			logrus.Error(err)
@@ -58,7 +36,7 @@ var allCmd = &cobra.Command{
 		}
 
 		for _, genFunc := range genFuncs {
-			if err = genFunc(ctree, utils.SelectServiceSuffix(sourceFile)); err != nil {
+			if err = genFunc(sourceFile); err != nil {
 				logrus.Fatal(err)
 			}
 		}

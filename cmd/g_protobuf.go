@@ -24,13 +24,7 @@ var grpcCmd = &cobra.Command{
 			return
 		}
 
-		cst, err := cst.New(sourceFile)
-		if err != nil {
-			logrus.Error(err)
-			return
-		}
-		serviceSuffix := utils.SelectServiceSuffix(sourceFile)
-		err = generateProtobuf(cst, serviceSuffix)
+		err := generateProtobuf(sourceFile)
 		if err != nil {
 			logrus.Error(err)
 			return
@@ -38,7 +32,12 @@ var grpcCmd = &cobra.Command{
 	},
 }
 
-func generateProtobuf(cst cst.ConcreteSyntaxTree, serviceSuffix string) error {
+func generateProtobuf(sourceFile string) error {
+	cst, err := cst.New(sourceFile)
+	if err != nil {
+		return err
+	}
+	serviceSuffix := utils.SelectServiceSuffix(sourceFile)
 	baseServiceName := service.GetBaseServiceName(cst.PackageName(), serviceSuffix)
 	protoPath := utils.GetProtobufFilePath(baseServiceName)
 	filename := filepath.Join(protoPath, cst.PackageName()+".proto")

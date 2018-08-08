@@ -26,19 +26,7 @@ type Middleware func({{.ServiceName}}) {{.ServiceName}}
 
 // New returns a basic Service with all of the expected middlewares wired in.
 func New(opts ...Option) {{.ServiceName}} {
-	var options Options
-	for _, opt := range opts {
-		opt(&options)
-	}
-
-	if options.service == nil {
-		options.service = noopService{}
-	}
-
-	for _, middleware := range options.middlewares {
-		options.service = middleware(options.service)
-	}
-	return newBasicService(options)
+	return newBasicService(opts...)
 }
 
 {{if .InterfaceMethods}}
@@ -85,6 +73,22 @@ type Options struct {
 
 type Option func(*Options)
 
+func newOptions(opts ...Option) Options {
+	var options Options
+	for _, opt := range opts {
+		opt(&options)
+	}
+
+	if options.service == nil {
+		options.service = noopService{}
+	}
+
+	for _, middleware := range options.middlewares {
+		options.service = middleware(options.service)
+	}
+	return options
+}
+
 func WithMiddleware(middlewares ...Middleware) Option {
 	return func(o *Options) {
 		o.middlewares = append(o.middlewares, middlewares...)
@@ -105,8 +109,8 @@ package {{.PackageName}}
 import "context"
 
 // NewBasicService returns a naïve, stateless implementation of {{.ServiceName}}.
-func newBasicService(opts Options) {{.ServiceName}} {
-	return basicService{opts: opts}
+func newBasicService(opts ...Option) {{.ServiceName}} {
+	return basicService{opts: newOptions(opts...)}
 }
 
 type basicService struct {
