@@ -45,13 +45,13 @@ func New(opts ...Option) *group.Group {
 	)
 
 	svc := spiderconn.Service{
-		ID:               uuid.NewUUID().String(),
 		Name:             options.name,
 		RegisterInterval: options.registerInterval,
 		TTL:              options.ttl,
 	}
 
 	if options.grpcAddr != "" {
+		svc.ID = uuid.NewUUID().String()
 		svc.Tags = []string{options.version, spiderconn.TransportTypeGRPC}
 		err := addGRPCServer(options, svc)
 		if err != nil {
@@ -61,6 +61,7 @@ func New(opts ...Option) *group.Group {
 	}
 
 	if options.httpAddr != "" {
+		svc.ID = uuid.NewUUID().String()
 		svc.Tags = []string{options.version, spiderconn.TransportTypeHTTP}
 		err := addHTTPServer(options, svc)
 		if err != nil {

@@ -24,14 +24,7 @@ type Set struct {
 // New returns a Set that wraps the provided server, and wires in all of the
 // expected endpoint middlewares via the various parameters.
 func New(opts ...Option) *Set {
-	var options Options
-	for _, opt := range opts {
-		opt(&options)
-	}
-
-	if options.service == nil {
-		options.service = {{$servicePackageName}}.New(options.serviceOptions...)
-	}
+	options := newOptions(opts...)
 
 {{range $index, $method := .ServiceMethods}}
 	var {{ToLowerFirstCamelCase $method.Name}} spiderconn.EndpointWrapper
@@ -88,6 +81,19 @@ type Options struct {
 }
 
 type Option func(*Options)
+
+func newOptions(opts ...Option) Options {
+	var options Options
+	for _, opt := range opts {
+		opt(&options)
+	}
+
+	if options.service == nil {
+		options.service = addservice.New(options.serviceOptions...)
+	}
+
+	return options
+}
 
 func WithMiddlewareCreators(cs ...middleware.Creator) Option {
 	return func(o *Options) {

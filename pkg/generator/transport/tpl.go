@@ -110,6 +110,9 @@ func NewGRPCClient(conn *grpc.ClientConn, opts ...ClientOption) {{$servicePackag
 // decodeGRPC{{.Request.Name}} is a transport/grpc.DecodeRequestFunc that converts a
 // gRPC {{.Request.Name}} to a user-domain {{.Request.Name}}. Primarily useful in a server.
 func decodeGRPC{{.Request.Name}}(_ context.Context, grpcReq interface{}) (interface{}, error) {
+        if grpcReq == nil {
+            return nil, nil
+        }
 	req := grpcReq.(*{{$protobufPackageName}}.{{.Request.Name}})
         {{if not .Request}}_ = req{{end}}
 	return &{{$servicePackageName}}.{{.Request.Name}}{
@@ -123,6 +126,9 @@ func decodeGRPC{{.Request.Name}}(_ context.Context, grpcReq interface{}) (interf
 // decodeGRPC{{.Response.Name}} is a transport/grpc.DecodeResponseFunc that converts a
 // gRPC {{.Response.Name}} to a user-domain {{.Response.Name}}. Primarily useful in a client.
 func decodeGRPC{{.Response.Name}}(_ context.Context, grpcResponse interface{}) (interface{}, error) {
+        if grpcResponse == nil {
+            return nil, nil
+        }
 	resp := grpcResponse.(*{{$protobufPackageName}}.{{.Response.Name}})
 	return &{{$servicePackageName}}.{{.Response.Name}}{
             {{$alias := NewObjectAlias "resp" $protobufPackageName .Response.Name true}}
@@ -138,6 +144,9 @@ func decodeGRPC{{.Response.Name}}(_ context.Context, grpcResponse interface{}) (
 // encodeGRPC{{.Request.Name}} is a transport/grpc.EncodeRequestFunc that converts a
 // user-domain {{.Request.Name}} to a gRPC {{.Request.Name}}. Primarily useful in a client.
 func encodeGRPC{{.Request.Name}}(_ context.Context, request interface{}) (interface{}, error) {
+        if request == nil {
+            return nil, nil
+        }
 	req := request.(*{{$servicePackageName}}.{{.Request.Name}})
         {{if not .Request}}_ = req{{end}}
 	return &{{$protobufPackageName}}.{{.Request.Name}}{
@@ -151,6 +160,9 @@ func encodeGRPC{{.Request.Name}}(_ context.Context, request interface{}) (interf
 // encodeGRPC{{.Response.Name}} is a transport/grpc.EncodeResponseFunc that converts a
 // user-domain {{.Response.Name}} to a gRPC {{.Response.Name}}. Primarily useful in a server.
 func encodeGRPC{{.Response.Name}}(_ context.Context, response interface{}) (interface{}, error) {
+        if response == nil {
+            return nil, nil
+        }
 	resp := response.(*{{$servicePackageName}}.{{.Response.Name}})
 	return &{{$protobufPackageName}}.{{.Response.Name}}{
             {{$alias := NewObjectAlias "resp" $servicePackageName .Response.Name true}}

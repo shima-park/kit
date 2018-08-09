@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -49,11 +50,16 @@ func generateProtobufGo(protoPath string) error {
 	}
 	//protoc -I ./ --go_out=plugins=grpc:./ ./test.proto
 	cmd := exec.Command("protoc", args...)
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
 	logrus.Info("protoc ", strings.Join(args, " "))
 	err := cmd.Run()
 	if err != nil {
-		return err
+		return fmt.Errorf(fmt.Sprint(err) + ": " + stderr.String())
 	}
+
 	return nil
 }
 

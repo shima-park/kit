@@ -111,16 +111,41 @@ func (g *ProtobufGenerator) generateServiceMethodFields(fields []cst.Field) {
 	}
 }
 
+func (g *ProtobufGenerator) getGrpcType(t cst.Type) (grpcType string, ignore bool) {
+	grpcType, found := g.GoType2GrpcType(t)
+	if !found {
+		pkg := g.cst.PackageName()
+		// 尝试从type所在的包查找
+		if t.X != "" {
+			pkg = t.X
+		}
+
+		grpcType, found := g.findStructInASTStructMap(pkg, t.Name)
+		if !found {
+			panic(fmt.Sprintf("Not found (%+v) in grpc type mapping(pkg:%s) and ast StructMap", t, pkg))
+		}
+		return grpcType, false
+	}
+	return grpcType, false
+}
+
 func (g *ProtobufGenerator) recursiveFieldType(t cst.Type) {
+	typ := t.BaseType
+	if t.ElementType != nil {
+		typ = *t.ElementType
+	} else if t.ValueType != nil {
+		typ = *t.ValueType
+	}
 	// 如果当前类型是struct 递归出所有组合的struct
-	if t.GoType != cst.StructType {
+	if typ.GoType != cst.StructType {
 		return
 	}
 	for _, structMap := range g.cst.StructMap() {
-		strc, found := structMap[t.Name]
+		strc, found := structMap[typ.Name]
 		if found {
 			_, found = g.referenceType[strc.Name]
-			if found {
+			if !found {
+				g.referenceType[strc.Name] = struct{}{}
 				for _, field := range strc.Fields {
 					// 将循环的字段名和递归入口的类型名做判断
 					// 防止死循环
@@ -128,8 +153,6 @@ func (g *ProtobufGenerator) recursiveFieldType(t cst.Type) {
 						g.recursiveFieldType(field.Type)
 					}
 				}
-			} else {
-				g.referenceType[strc.Name] = struct{}{}
 			}
 		}
 	}
@@ -249,35 +272,8 @@ func (g *ProtobufGenerator) checkPBTag(strc *cst.Struct) {
 	}
 }
 
-func (g *ProtobufGenerator) getGrpcType(t cst.Type) (grpcType string, ignore bool) {
-	grpcType, found := g.GoType2GrpcType(t)
-	if !found {
-		pkg := g.cst.PackageName()
-		// 尝试从type所在的包查找
-		if t.X != "" {
-			pkg = t.X
-		}
-
-		grpcType, found := g.findStructInASTStructMap(pkg, t.Name)
-		if !found {
-			switch t.GoType {
-			case cst.StructType:
-				panic(fmt.Sprintf("Not found (%+v) in grpc type mapping(pkg:%s) and ast StructMap", t, pkg))
-			}
-			return grpcType, true
-		}
-		return grpcType, false
-	}
-	return grpcType, false
-}
-
 func (g *ProtobufGenerator) findStructInASTStructMap(pkg, structName string) (string, bool) {
 	if strc, found := g.cst.StructMap()[pkg][structName]; found {
-		// 存储接口定义中使用过的结构类型，方便判断后面message中是否生成
-		_, found = g.referenceType[structName]
-		if !found {
-			g.referenceType[structName] = struct{}{}
-		}
 		return strc.Name, true
 	}
 
@@ -295,76 +291,52 @@ func (g *ProtobufGenerator) GoType2GrpcType(t cst.Type) (grpcType string, found 
 			return "bytes", true
 		}
 
-		var ident string
-		if strings.HasPrefix(goType, "[]") {
-			ident = goType[2:]
-		} else if strings.HasPrefix(goType, "*[]") {
-			ident = goType[3:]
-		}
-
-		if strings.Contains(ident, ".") {
-			ss := strings.Split(ident, ".")
-			pkg := strings.Trim(ss[0], "*")
-			structName := ss[1]
-			grpcType, found = g.findStructInASTStructMap(pkg, structName)
+		switch t.ElementType.GoType {
+		case cst.BasicType:
+			grpcType, found = GoBasicType2GrpcType(t.ElementType.Name)
 			if !found {
 				return "", false
 			}
-		} else {
-			structName := strings.Trim(ident, "*")
-			grpcType, found = GoBasicType2GrpcType(structName)
-			if !found {
-				grpcType, found = g.findStructInASTStructMap(g.cst.PackageName(), structName)
-			}
+		case cst.StructType:
+			grpcType = t.ElementType.Name
+			found = true
+		default:
+			panic("Unsupport grpc item of array:" + t.ElementType.Name)
 		}
-		return "repeated " + grpcType, found
+
+		return "repeated " + grpcType, true
 	case cst.MapType:
 		// TODO Key in map field cannot be float/doubl, bytes or message types.
 		// protobuf的key类型不能为float/doubl, bytes or message
-		quoteStart := strings.Index(goType, "[")
-		quoteEnd := strings.Index(goType, "]")
-		keyStr := goType[quoteStart+1 : quoteEnd]
-		keyType, found := GoBasicType2GrpcType(keyStr)
-		if !found {
-			if strings.Contains(keyStr, ".") {
-				ss := strings.Split(keyStr, ".")
-				pkg := strings.Trim(ss[0], "*")
-				structName := ss[1]
-				keyType, found = g.findStructInASTStructMap(pkg, structName)
-				if !found {
-					return "", false
-				}
-			} else {
-				keyType, found = g.findStructInASTStructMap(g.cst.PackageName(), keyStr)
-				if !found {
-					return "", false
-				}
+
+		var keyType string
+		switch t.KeyType.GoType {
+		case cst.BasicType:
+			keyType, found = GoBasicType2GrpcType(t.KeyType.Name)
+			if !found {
+				return "", false
 			}
+		default:
+			panic("Unsupport grpc type of key of map:" + t.KeyType.Name)
 		}
 
-		valStr := goType[quoteEnd+1:]
-		valueType, found := GoBasicType2GrpcType(valStr)
-		if !found {
-			if strings.Contains(valStr, ".") {
-				ss := strings.Split(valStr, ".")
-				pkg := strings.Trim(ss[0], "*")
-				structName := ss[1]
-				valueType, found = g.findStructInASTStructMap(pkg, structName)
-				if !found {
-					return "", false
-				}
-			} else {
-				structName := strings.Trim(valStr, "*")
-				valueType, found = g.findStructInASTStructMap(g.cst.PackageName(), structName)
-				if !found {
-					return "", false
-				}
+		var valueType string
+		switch t.ValueType.GoType {
+		case cst.BasicType:
+			valueType, found = GoBasicType2GrpcType(t.ValueType.Name)
+			if !found {
+				return "", false
 			}
+		case cst.StructType:
+			valueType = t.ValueType.Name
+			found = true
+		default:
+			panic("Unsupport grpc value of key of map:" + t.KeyType.Name)
 		}
 
 		return fmt.Sprintf("map<%s, %s>", keyType, valueType), true
 	case cst.StructType:
-
+		return t.Name, true
 	case cst.CrossProtocolUnsupportType:
 		panic(fmt.Sprintf("This type(%s %s) is unsupport cross protocol", t.Name, t.GoType))
 	}
