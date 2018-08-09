@@ -174,21 +174,7 @@ func (g *AssignmentGenerator) generateBasicTypeAssignmentConvertFunc(srcAlias Al
 }
 
 // 生成结构体转换的方法体
-func (g *AssignmentGenerator) generateStructTypeAssignmentConvertFunc(srcAlias Alias, src, dst cst.Field, srcStruct, dstStruct *cst.Struct) error {
-	var (
-		dstType = dst.Type.BaseType
-		srcType = src.Type.BaseType
-	)
-	if dst.Type.ElementType != nil {
-		// 当前父类型是数组时
-		dstType = *dst.Type.ElementType
-		srcType = *src.Type.ElementType
-	} else if dst.Type.ValueType != nil {
-		// 当前父类型是map时
-		dstType = *dst.Type.ValueType
-		srcType = *src.Type.ValueType
-	}
-
+func (g *AssignmentGenerator) generateStructTypeAssignmentConvertFunc(srcAlias Alias, srcType, dstType cst.BaseType, srcStruct, dstStruct *cst.Struct) error {
 	dstType.X = dstStruct.PackageName
 	srcType.X = srcStruct.PackageName
 	g.println("func(src %s) (dst %s) {", srcType.String(), dstType.String())
@@ -246,19 +232,13 @@ func (g *AssignmentGenerator) generateAssignmentSegment(srcAlias Alias, src cst.
 		g.generateBasicTypeAssignmentConvertFunc(srcAlias.With(src.Name), src.Type.BaseType, dst.Type.BaseType)
 		g.println(",")
 	case cst.StructType:
-		var (
-			srcType = src.Type.BaseType
-			dstType = dst.Type.BaseType
-		)
-		if dst.Type.ElementType != nil {
-			srcType = *src.Type.ElementType
-			dstType = *dst.Type.ElementType
-		}
+		srcType := src.Type.BaseType
+		dstType := dst.Type.BaseType
 		// 寻找类型的数据结构
 		srcStruct := g.findStruct(g.src.PackageName, srcType.Name)
 		dstStruct := g.findStruct(g.dst.PackageName, dstType.Name)
 		g.print("%s: ", dst.Name)
-		err := g.generateStructTypeAssignmentConvertFunc(srcAlias.With(src.Name), src, dst, srcStruct, dstStruct)
+		err := g.generateStructTypeAssignmentConvertFunc(srcAlias.With(src.Name), srcType, dstType, srcStruct, dstStruct)
 		if err != nil {
 			return err
 		}
@@ -312,8 +292,8 @@ func (g *AssignmentGenerator) generateAssignmentSegment(srcAlias Alias, src cst.
 					g.print("dst[i] = ")
 					err := g.generateStructTypeAssignmentConvertFunc(
 						srcAlias.ReplaceName("temp"),
-						src,
-						dst,
+						*src.Type.ElementType,
+						*dst.Type.ElementType,
 						srcStruct,
 						dstStruct,
 					)
@@ -383,8 +363,8 @@ func (g *AssignmentGenerator) generateAssignmentSegment(srcAlias Alias, src cst.
 					g.print("dst[k] =")
 					err := g.generateStructTypeAssignmentConvertFunc(
 						srcAlias.ReplaceName("v"),
-						src,
-						dst,
+						*src.Type.ValueType,
+						*dst.Type.ValueType,
 						srcStruct,
 						dstStruct,
 					)
