@@ -84,6 +84,6 @@ func generateServer(sourceFile string) error {
 func init() {
 	generateCmd.AddCommand(serverCmd)
 
-	serverCmd.Flags().StringP("source", "s", "", "Need to analyze the source file of ast")
+	serverCmd.Flags().StringP("source", "s", "", "Source file defined by the service interface")
 	viper.BindPFlag("g_s_source_file", serverCmd.Flags().Lookup("source"))
 }

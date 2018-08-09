@@ -35,9 +35,7 @@ func New(opts ...Option) (addservice.AddService, error) {
 	default:
 		options.transport = spiderconn.DefaultTransport
 
-		if options.instancer == nil &&
-			options.grpcAddr == "" && options.httpAddr == "" {
-
+		if options.instancer == nil {
 			if options.consulAddr == "" {
 				options.consulAddr = spiderconn.DefaultConsulAddress
 			}
@@ -235,18 +233,6 @@ func WithVersion(version string) Option {
 	}
 }
 
-func WithTransportGRPC() Option {
-	return func(o *Options) {
-		o.transport = spiderconn.TransportTypeGRPC
-	}
-}
-
-func WithTransportHTTP() Option {
-	return func(o *Options) {
-		o.transport = spiderconn.TransportTypeHTTP
-	}
-}
-
 func WithConsulAddress(addr string) Option {
 	return func(o *Options) {
 		o.consulAddr = addr
@@ -256,14 +242,14 @@ func WithConsulAddress(addr string) Option {
 func WithHTTPAddress(addr string) Option {
 	return func(o *Options) {
 		o.httpAddr = addr
-		WithTransportHTTP()(o)
+		o.transport = spiderconn.TransportTypeHTTP
 	}
 }
 
 func WithGrpcAddress(addr string) Option {
 	return func(o *Options) {
 		o.grpcAddr = addr
-		WithTransportGRPC()(o)
+		o.transport = spiderconn.TransportTypeGRPC
 	}
 }
 

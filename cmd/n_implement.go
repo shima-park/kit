@@ -80,9 +80,9 @@ func generateImpl(sourceFile string) error {
 func init() {
 	newCmd.AddCommand(implCmd)
 
-	implCmd.Flags().StringP("source", "s", "", "Need to analyze the source file of ast")
-	implCmd.Flags().StringP("receiver", "r", "", "Need to analyze the source file of ast")
-	implCmd.Flags().StringP("interface", "i", "", "Need to analyze the source file of ast")
+	implCmd.Flags().StringP("source", "s", "", "Source file defined by the service interface")
+	implCmd.Flags().StringP("receiver", "r", "", "Receiver of each function")
+	implCmd.Flags().StringP("interface", "i", "", "Interface that needs to generate a method list")
 	viper.BindPFlag("n_i_interface", implCmd.Flags().Lookup("interface"))
 	viper.BindPFlag("n_i_receiver", implCmd.Flags().Lookup("receiver"))
 	viper.BindPFlag("n_i_source_file", implCmd.Flags().Lookup("source"))

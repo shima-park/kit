@@ -84,6 +84,6 @@ func (n ServiceNameNormalizer) Normalize(name string) string {
 func init() {
 	generateCmd.AddCommand(grpcCmd)
 
-	grpcCmd.Flags().StringP("source", "s", "", "Need to analyze the source file of ast")
+	grpcCmd.Flags().StringP("source", "s", "", "Source file defined by the service interface")
 	viper.BindPFlag("g_s_source_file", grpcCmd.Flags().Lookup("source"))
 }

@@ -83,6 +83,6 @@ func generateEndpoint(sourceFile string) error {
 func init() {
 	generateCmd.AddCommand(endpointCmd)
 
-	endpointCmd.Flags().StringP("source", "s", "", "Need to analyze the source file of ast")
+	endpointCmd.Flags().StringP("source", "s", "", "Source file defined by the service interface")
 	viper.BindPFlag("g_e_source_file", endpointCmd.Flags().Lookup("source"))
 }

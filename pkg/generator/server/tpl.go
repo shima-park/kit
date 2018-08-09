@@ -30,21 +30,19 @@ import (
 )
 
 func New(opts ...Option) *group.Group {
-	var (
-		options  Options
-		service  {{$servicePackageName}}.{{.ServiceName}}
-		endpoint *{{$endpointPackageName}}.Set
-	)
-	options = newOptions(opts...)
-
-	service = {{$servicePackageName}}.New(options.serviceOptions...)
-
-	options.endpointOptions = append(
-		options.endpointOptions, {{$endpointPackageName}}.WithService(service))
-	endpoint = {{$endpointPackageName}}.New(options.endpointOptions...)
+	options := newOptions(opts...)
 
 	options.transportOptions = append(
-		options.transportOptions, {{$transportPackageName}}.WithEndpoints(endpoint))
+		options.transportOptions,
+		addtransport.WithEndpointOptions(
+			append(
+				options.endpointOptions,
+				addendpoint.WithServiceOptions(
+					options.serviceOptions...,
+				),
+			)...,
+		),
+	)
 
 	svc := spiderconn.Service{
 		ID:               uuid.NewUUID().String(),
@@ -172,7 +170,7 @@ func addHTTPServer(options Options, svc spiderconn.Service) error {
 	}
 
 	group.Add(func() error {
-		logger.Log("transport", "HTTP", "addr", httpAddr)
+		logger.Log("transport", "HTTP", "addr", httpListener.Addr())
 
 		registrar.Register()
 
@@ -250,6 +248,14 @@ func newOptions(opts ...Option) Options {
 		options.ctx = context.Background()
 	}
 
+	if options.logger == nil {
+		options.logger = spiderconn.DefaultLogger
+	}
+
+	if options.group == nil {
+		options.group = &group.Group{}
+	}
+
 	if options.name == "" {
 		options.name = spiderconn.DefaultServiceName
 	}
@@ -266,16 +272,13 @@ func newOptions(opts ...Option) Options {
 		options.registerInterval = spiderconn.DefaultRegisterInterval
 	}
 
-	if options.grpcAddr == "" && options.httpAddr == "" {
-		options.grpcAddr = spiderconn.DefaultServiceAddress
-	}
-
-	if options.logger == nil {
-		options.logger = spiderconn.DefaultLogger
-	}
-
-	if options.group == nil {
-		options.group = &group.Group{}
+        if options.grpcAddr == "" && options.httpAddr == "" {
+		switch spiderconn.DefaultTransport {
+		case spiderconn.TransportTypeGRPC:
+			options.grpcAddr = spiderconn.DefaultServiceAddress
+		case spiderconn.TransportTypeHTTP:
+			options.httpAddr = spiderconn.DefaultServiceAddress
+		}
 	}
 
 	if options.registrarCreator == nil {

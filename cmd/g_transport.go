@@ -87,7 +87,7 @@ func generateTransport(sourceFile string) error {
 func init() {
 	generateCmd.AddCommand(transportCmd)
 
-	transportCmd.Flags().StringP("source", "s", "", "Need to analyze the source file of ast")
+	transportCmd.Flags().StringP("source", "s", "", "Source file defined by the service interface")
 	viper.BindPFlag("g_t_source_file", transportCmd.Flags().Lookup("source"))
 
 	transportCmd.Flags().StringP("transport", "t", "grpc", "Transport type(all, grpc, thrift, http)")

@@ -69,7 +69,7 @@ var serviceCmd = &cobra.Command{
 func init() {
 	newCmd.AddCommand(serviceCmd)
 
-	serviceCmd.Flags().StringP("service", "s", "", "Name of service")
+	serviceCmd.Flags().StringP("service", "s", "", "The name of the service")
 	serviceCmd.Flags().StringP("methods", "m", "", "List of methods of service")
 	viper.BindPFlag("ns_service", serviceCmd.Flags().Lookup("service"))
 	viper.BindPFlag("ns_methods", serviceCmd.Flags().Lookup("methods"))

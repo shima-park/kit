@@ -47,7 +47,7 @@ var allCmd = &cobra.Command{
 func init() {
 	generateCmd.AddCommand(allCmd)
 
-	allCmd.Flags().StringP("source", "s", "", "Need to analyze the source file of ast")
+	allCmd.Flags().StringP("source", "s", "", "Source file defined by the service interface")
 	allCmd.Flags().StringP("pkg", "p", "", "If you want to replace package of source file ")
 	viper.BindPFlag("g_a_package", allCmd.Flags().Lookup("pkg"))
 	viper.BindPFlag("g_a_source_file", allCmd.Flags().Lookup("source"))
