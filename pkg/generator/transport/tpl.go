@@ -98,7 +98,7 @@ func NewGRPCClient(conn *grpc.ClientConn, opts ...ClientOption) {{$servicePackag
 	// Returning the endpoint.Set as a {{$servicePackageName}}.{{.ServiceName}} relies on the
 	// endpoint.Set implementing the {{.ServiceName}} methods. That's just a simple bit
 	// of glue code.
-	return addendpoint.Set{
+	return {{$endpointPackageName}}.Set{
 {{range $index, $method := .ServiceMethods}}
 		{{$method.Name}}Endpoint: {{ToLowerFirstCamelCase $method.Name}}Wrapper,
 {{end}}
@@ -255,7 +255,7 @@ func NewHTTPClient(instance string, opts ...ClientOption) ({{$servicePackageName
 	// Returning the endpoint.Set as a service.Service relies on the
 	// endpoint.Set implementing the Service methods. That's just a simple bit
 	// of glue code.
-	return addendpoint.Set{
+	return {{$endpointPackageName}}.Set{
 {{range $index, $method := .ServiceMethods}}
 		{{$method.Name}}Endpoint: {{ToLowerFirstCamelCase $method.Name}}Wrapper,
 {{end}}

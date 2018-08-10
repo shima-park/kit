@@ -5,7 +5,7 @@ var DefaultServerTemplate = `
 {{$endpointPackageName := BasePath .EndpointImportPath}}
 {{$protobufPackageName := BasePath .ProtobufImportPath}}
 {{$transportPackageName := BasePath .TransportImportPath}}
-package addserver
+package {{.PackageName}}
 
 import (
 	"fmt"
@@ -34,10 +34,10 @@ func New(opts ...Option) *group.Group {
 
 	options.transportOptions = append(
 		options.transportOptions,
-		addtransport.WithEndpointOptions(
+		{{$transportPackageName}}.WithEndpointOptions(
 			append(
 				options.endpointOptions,
-				addendpoint.WithServiceOptions(
+				{{$endpointPackageName}}.WithServiceOptions(
 					options.serviceOptions...,
 				),
 			)...,
@@ -52,7 +52,10 @@ func New(opts ...Option) *group.Group {
 
 	if options.grpcAddr != "" {
 		svc.ID = uuid.NewUUID().String()
-		svc.Tags = []string{options.version, spiderconn.TransportTypeGRPC}
+		svc.Tags = append(
+			options.tags,
+			[]string{options.version, spiderconn.TransportTypeGRPC}...,
+		)
 		err := addGRPCServer(options, svc)
 		if err != nil {
 			options.logger.Log("err", err)
@@ -62,7 +65,10 @@ func New(opts ...Option) *group.Group {
 
 	if options.httpAddr != "" {
 		svc.ID = uuid.NewUUID().String()
-		svc.Tags = []string{options.version, spiderconn.TransportTypeHTTP}
+		svc.Tags = append(
+			options.tags,
+			[]string{options.version, spiderconn.TransportTypeHTTP}...,
+		)
 		err := addHTTPServer(options, svc)
 		if err != nil {
 			options.logger.Log("err", err)
@@ -93,47 +99,68 @@ func addGRPCServer(options Options, svc spiderconn.Service) error {
 		group            *group.Group                = options.group
 		grpcAddr         string                      = options.grpcAddr
 		grpcServer       *grpc.Server                = options.grpcServer
+                grpcListener     net.Listener                = options.grpcListener
 		registrarCreator spiderconn.RegistrarCreator = options.registrarCreator
 		consulAddr       string                      = options.registrarAddress
 		transportOptions []{{$transportPackageName}}.Option       = options.transportOptions
+		isRegister bool = registrarCreator != nil // 注册器不为空时注册当前服务
+		isListener bool = grpcListener == nil     // net.Listener为nil时，新建Listener监听，并将服务注册入group。否则外部自行启动监听
+		isServe      bool = grpcServer == nil       // grpcServer为nil时，新建grpcServer，并将接口实现和健康检查注册
+		registrar  sd.Registrar
+		err        error
 	)
 
-	if grpcServer == nil {
-		grpcServer = grpc.NewServer(grpc.UnaryInterceptor(kitgrpc.Interceptor))
-	}
+        if isListener {
+		grpcListener, err = net.Listen("tcp", grpcAddr)
+		if err != nil {
+			logger.Log("transport", "gRPC", "during", "Listen", "err", err)
+			return err
+		}
 
-	grpcListener, err := net.Listen("tcp", grpcAddr)
-	if err != nil {
-		logger.Log("transport", "gRPC", "during", "Listen", "err", err)
-		return err
-	}
-
-	registrar, err := registrarCreator(
-		consulAddr,
-		logger,
-		grpcListener.Addr().String(),
-		svc, true)
-	if err != nil {
-		logger.Log("registrar", "consul", "err", err)
-		return err
-	}
-
-	group.Add(func() error {
 		logger.Log("transport", "gRPC", "addr", grpcListener.Addr())
+	}
 
-		transport := {{$transportPackageName}}.NewGRPCServer(transportOptions...)
+	if isRegister {
+		registrar, err = registrarCreator(
+			consulAddr,
+			logger,
+			grpcListener.Addr().String(),
+			svc, true)
+		if err != nil {
+			logger.Log("registrar", "consul", "err", err)
+			return err
+		}
+	}
 
-		addpb.RegisterAddServer(grpcServer, transport)
+	if isServe {
+		grpcServer = grpc.NewServer(grpc.UnaryInterceptor(kitgrpc.Interceptor))
 		// 默认注册上 grpc healthcheck
 		hv1.RegisterHealthServer(grpcServer, health.NewGRPCCheckServer())
+	}
 
-		registrar.Register()
+	transport := {{$transportPackageName}}.NewGRPCServer(transportOptions...)
+	{{$protobufPackageName}}.Register{{ToCamelCase .BaseServiceName}}Server(grpcServer, transport)
 
-		return grpcServer.Serve(grpcListener)
-	}, func(error) {
-		registrar.Deregister()
+	errCh := make(chan error)
+	group.Add(func() error {
+		if isRegister {
+			registrar.Register()
+		}
 
-		grpcListener.Close()
+		if isListener && isServe {
+			errCh <- grpcServer.Serve(grpcListener)
+		}
+		return <-errCh
+	}, func(err error) {
+		if isRegister {
+			registrar.Deregister()
+		}
+
+		if isListener {
+			grpcListener.Close()
+		}
+
+		errCh <- err
 	})
 	return nil
 }
@@ -143,49 +170,72 @@ func addHTTPServer(options Options, svc spiderconn.Service) error {
 		logger           log.Logger                  = options.logger
 		group            *group.Group                = options.group
 		httpAddr         string                      = options.httpAddr
-		httpPattern      string                      = options.httpPattern
+                httpPattern      string                      = options.httpPattern
 		httpMux          *http.ServeMux              = options.httpMux
+		httpListener     net.Listener                = options.httpListener
 		registrarCreator spiderconn.RegistrarCreator = options.registrarCreator
 		consulAddr       string                      = options.registrarAddress
 		transportOptions []{{$transportPackageName}}.Option       = options.transportOptions
+
+		isRegister       bool                        = registrarCreator != nil
+		isListener       bool                        = httpListener == nil
+		isServe          bool                        = httpMux == nil
+		registrar        sd.Registrar
+		err              error
 	)
 
-	if httpMux == nil {
+	if isListener {
+		httpListener, err = net.Listen("tcp", httpAddr)
+		if err != nil {
+			logger.Log("transport", "HTTP", "during", "Listen", "err", err)
+			return err
+		}
+		logger.Log("transport", "HTTP", "addr", httpListener.Addr())
+	}
+
+	if isRegister {
+		registrar, err = registrarCreator(
+			consulAddr,
+			logger,
+			httpListener.Addr().String(),
+			svc, false)
+		if err != nil {
+			logger.Log("registrar", "consul", "err", err)
+			return err
+		}
+	}
+
+	if isServe {
 		httpMux = http.NewServeMux()
 	}
 
-	httpListener, err := net.Listen("tcp", httpAddr)
-	if err != nil {
-		logger.Log("transport", "HTTP", "during", "Listen", "err", err)
-		return err
+	transport := {{$transportPackageName}}.NewHTTPHandler(transportOptions...)
+	if httpPattern != "" {
+		httpMux.Handle(httpPattern, transport)
+		return http.Serve(httpListener, httpMux)
 	}
 
-	registrar, err := registrarCreator(
-		consulAddr,
-		logger,
-		httpListener.Addr().String(),
-		svc, false)
-	if err != nil {
-		logger.Log("registrar", "consul", "err", err)
-		return err
-	}
-
+	errCh := make(chan error)
 	group.Add(func() error {
-		logger.Log("transport", "HTTP", "addr", httpListener.Addr())
-
-		registrar.Register()
-
-		transport := {{$transportPackageName}}.NewHTTPHandler(transportOptions...)
-
-		if httpPattern != "" {
-			httpMux.Handle(httpPattern, transport)
-			return http.Serve(httpListener, httpMux)
+		if isRegister {
+			registrar.Register()
 		}
-		return http.Serve(httpListener, transport)
-	}, func(error) {
-		registrar.Deregister()
 
-		httpListener.Close()
+		if isListener && isServe {
+			errCh <- http.Serve(httpListener, httpMux)
+		}
+
+		return <-errCh
+	}, func(error) {
+		if isRegister {
+			registrar.Deregister()
+		}
+
+		if isListener {
+			httpListener.Close()
+		}
+
+		errCh <- err
 	})
 	return nil
 }`
@@ -215,6 +265,7 @@ type Options struct {
 	version          string
 	ttl              time.Duration
 	registerInterval time.Duration
+        tags             []string
 
 	logger log.Logger
 	//	otTracer opentracing.Tracer
@@ -231,10 +282,12 @@ type Options struct {
 
 	grpcAddr   string
 	grpcServer *grpc.Server
+        grpcListener net.Listener
 
 	httpAddr    string
 	httpPattern string
 	httpMux     *http.ServeMux
+        httpListener net.Listener
 }
 
 type Option func(*Options)
@@ -249,12 +302,12 @@ func newOptions(opts ...Option) Options {
 		options.ctx = context.Background()
 	}
 
-	if options.logger == nil {
-		options.logger = spiderconn.DefaultLogger
+        if options.group == nil {
+		options.group = &group.Group{}
 	}
 
-	if options.group == nil {
-		options.group = &group.Group{}
+	if options.logger == nil {
+		options.logger = spiderconn.DefaultLogger
 	}
 
 	if options.name == "" {
@@ -280,10 +333,6 @@ func newOptions(opts ...Option) Options {
 		case spiderconn.TransportTypeHTTP:
 			options.httpAddr = spiderconn.DefaultServiceAddress
 		}
-	}
-
-	if options.registrarCreator == nil {
-		options.registrarCreator = spiderconn.NewConsulRegistrar
 	}
 
 	return options
@@ -313,6 +362,12 @@ func WithRegisterInterval(interval time.Duration) Option {
 	}
 }
 
+func WithTags(tags []string) Option {
+	return func(o *Options) {
+		o.tags = tags
+	}
+}
+
 func WithLogger(logger log.Logger) Option {
 	return func(o *Options) {
 		o.logger = logger
@@ -335,6 +390,9 @@ func WithRegistrarCreator(c spiderconn.RegistrarCreator) Option {
 func WithRegistrarAddress(addr string) Option {
 	return func(o *Options) {
 		o.registrarAddress = addr
+                if o.registrarCreator == nil {
+			o.registrarCreator = spiderconn.NewConsulRegistrar
+		}
 	}
 }
 
@@ -368,6 +426,12 @@ func WithGrpcServer(grpcServer *grpc.Server) Option {
 	}
 }
 
+func WithGrpcListener(grpcListener net.Listener) Option {
+	return func(o *Options) {
+		o.grpcListener = grpcListener
+	}
+}
+
 func WithHTTPAddr(httpAddr string) Option {
 	return func(o *Options) {
 		o.httpAddr = httpAddr
@@ -384,4 +448,11 @@ func WithHTTPMux(mux *http.ServeMux) Option {
 	return func(o *Options) {
 		o.httpMux = mux
 	}
-}`
+}
+
+func WithHTTPListener(httpListener net.Listener) Option {
+	return func(o *Options) {
+		o.httpListener = httpListener
+	}
+}
+`

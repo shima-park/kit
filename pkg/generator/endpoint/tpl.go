@@ -89,7 +89,7 @@ func newOptions(opts ...Option) Options {
 	}
 
 	if options.service == nil {
-		options.service = addservice.New(options.serviceOptions...)
+		options.service = {{$servicePackageName}}.New(options.serviceOptions...)
 	}
 
 	return options

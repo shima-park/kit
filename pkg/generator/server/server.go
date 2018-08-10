@@ -32,7 +32,8 @@ func (g *ServerGenerator) Generate() error {
 		}
 
 		t := template.New(string(tplName)).Funcs(map[string]interface{}{
-			"BasePath": filepath.Base,
+			"BasePath":    filepath.Base,
+			"ToCamelCase": utils.ToCamelCase,
 		})
 		t, err = t.Parse(string(tplBody))
 		if err != nil {

@@ -23,7 +23,7 @@ import (
 	"google.golang.org/grpc"
 )
 
-func New(opts ...Option) (addservice.AddService, error) {
+func New(opts ...Option) ({{$servicePackageName}}.{{.ServiceName}}, error) {
 	var options Options
 	options = newOptions(opts...)
 
@@ -150,7 +150,7 @@ func httpFactoryFor(makeEndpoint func({{$servicePackageName}}.{{.ServiceName}}) 
 `
 
 var DefaultOptionsTemplate = `
-package addclient
+package {{.PackageName}}
 
 import (
 	"ezrpro.com/micro/spiderconn"
@@ -159,15 +159,11 @@ import (
 	"github.com/go-kit/kit/sd"
 )
 
-const (
-	defaultServiceName    = "go.server"
-	defaultServcieVersion = "1.0.0"
-)
-
 type Options struct {
 	logger log.Logger
 
-	// 默认使用consul
+	// 默认使用consul进行服务发现，如果没有设置grpc或者http地址，则默认
+        // 使用grpc tag去consul进行服务节点发现
 	instancer sd.Instancer
 
 	// consulAddr, grpcAddr, httpAddr 三选一
@@ -262,7 +258,7 @@ func WithMiddlewareCreator(middlewareCreators ...middleware.Creator) Option {
 
 var DefaultExportedTemplate = `
 {{$servicePackageName := BasePath .ServiceImportPath}}
-package addclient
+package {{.PackageName}}
 
 import (
 	"context"
@@ -283,23 +279,6 @@ var (
 	defaultClient {{$servicePackageName}}.{{.ServiceName}}
 )
 
-{{range $index, $method := .ServiceMethods}}
-func {{$method.Name}}(ctx context.Context, req *{{$servicePackageName}}.{{$method.Name}}Request) (resp *{{$servicePackageName}}.{{$method.Name}}Response, err error) {
-	return GetDefaultClient().{{$method.Name}}(ctx, req)
-}
-{{end}}
-
-func GetDefaultClient() {{$servicePackageName}}.{{.ServiceName}} {
-	if defaultClient == nil {
-		panic("{{$servicePackageName}} default client is not initialized")
-	}
-	return defaultClient
-}
-
-func SetDefaultClient(svc {{$servicePackageName}}.{{.ServiceName}}) {
-	defaultClient = svc
-}
-
 func InitDefaultClient(opts ...Option) error {
 	var err error
 	defaultClient, err = New(opts...)
@@ -309,15 +288,20 @@ func InitDefaultClient(opts ...Option) error {
 	return nil
 }
 
-func init() {
-	InitDefaultClient(
-		WithConsulAddress(spiderconn.DefaultConsulAddress),
-		WithLogger(spiderconn.DefaultLogger),
-		WithMiddlewareCreator(
-			tracer.Creator(spiderconn.DefaultTracer),
-			limiter.ErroringLimiterCreator(spiderconn.DefaultLimiter),
-			circuitbreaker.Creator(spiderconn.DefaultCircuitBreakerOptions...),
-		),
-	)
+func SetDefaultClient(svc {{$servicePackageName}}.{{.ServiceName}}) {
+	defaultClient = svc
 }
+
+func GetDefaultClient() {{$servicePackageName}}.{{.ServiceName}} {
+	if defaultClient == nil {
+		panic("{{$servicePackageName}} default client is not initialized")
+	}
+	return defaultClient
+}
+
+{{range $index, $method := .ServiceMethods}}
+func {{$method.Name}}(ctx context.Context, req *{{$servicePackageName}}.{{$method.Name}}Request) (resp *{{$servicePackageName}}.{{$method.Name}}Response, err error) {
+	return GetDefaultClient().{{$method.Name}}(ctx, req)
+}
+{{end}}
 `
