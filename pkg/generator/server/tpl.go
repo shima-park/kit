@@ -141,7 +141,7 @@ func addGRPCServer(options Options, svc spiderconn.Service) error {
 	transport := {{$transportPackageName}}.NewGRPCServer(transportOptions...)
 	{{$protobufPackageName}}.Register{{ToCamelCase .BaseServiceName}}Server(grpcServer, transport)
 
-	errCh := make(chan error)
+	errCh := make(chan error, 1)
 	group.Add(func() error {
 		if isRegister {
 			registrar.Register()
@@ -149,6 +149,7 @@ func addGRPCServer(options Options, svc spiderconn.Service) error {
 
 		if isListener && isServe {
 			errCh <- grpcServer.Serve(grpcListener)
+			return <-errCh
 		}
 		return <-errCh
 	}, func(err error) {
@@ -215,7 +216,7 @@ func addHTTPServer(options Options, svc spiderconn.Service) error {
 		return http.Serve(httpListener, httpMux)
 	}
 
-	errCh := make(chan error)
+	errCh := make(chan error, 1)
 	group.Add(func() error {
 		if isRegister {
 			registrar.Register()
@@ -223,6 +224,7 @@ func addHTTPServer(options Options, svc spiderconn.Service) error {
 
 		if isListener && isServe {
 			errCh <- http.Serve(httpListener, httpMux)
+                        return <-errCh
 		}
 
 		return <-errCh
