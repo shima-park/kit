@@ -51,7 +51,9 @@ func New(opts ...Option) *group.Group {
 	}
 
 	if options.grpcAddr != "" {
-		svc.ID = uuid.NewUUID().String()
+		if options.id == "" {
+			svc.ID = uuid.NewUUID().String()
+		}
 		svc.Tags = append(
 			options.tags,
 			[]string{options.version, spiderconn.TransportTypeGRPC}...,
@@ -64,7 +66,9 @@ func New(opts ...Option) *group.Group {
 	}
 
 	if options.httpAddr != "" {
-		svc.ID = uuid.NewUUID().String()
+		if options.id == "" {
+			svc.ID = uuid.NewUUID().String()
+		}
 		svc.Tags = append(
 			options.tags,
 			[]string{options.version, spiderconn.TransportTypeHTTP}...,
@@ -148,8 +152,12 @@ func addGRPCServer(options Options, svc spiderconn.Service) error {
 		}
 
 		if isListener && isServe {
-			errCh <- grpcServer.Serve(grpcListener)
-			return <-errCh
+			select {
+			case errCh <- grpcServer.Serve(grpcListener):
+				return <-errCh
+			case err := <-errCh:
+				return err
+			}
 		}
 		return <-errCh
 	}, func(err error) {
@@ -223,12 +231,16 @@ func addHTTPServer(options Options, svc spiderconn.Service) error {
 		}
 
 		if isListener && isServe {
-			errCh <- http.Serve(httpListener, httpMux)
-                        return <-errCh
+			select {
+			case errCh <- http.Serve(httpListener, httpMux):
+				return <-errCh
+			case err := <-errCh:
+				return err
+			}
 		}
 
 		return <-errCh
-	}, func(error) {
+	}, func(err error) {
 		if isRegister {
 			registrar.Deregister()
 		}
@@ -263,6 +275,7 @@ import (
 )
 
 type Options struct {
+        id               string
 	name             string
 	version          string
 	ttl              time.Duration
@@ -338,6 +351,12 @@ func newOptions(opts ...Option) Options {
 	}
 
 	return options
+}
+
+func WithID(id string) Option {
+	return func(o *Options) {
+		o.id = id
+	}
 }
 
 func WithName(name string) Option {
