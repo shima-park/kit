@@ -29,7 +29,19 @@ func New(opts ...Option) {{.ServiceName}} {
 	return newBasicService(opts...)
 }
 
-{{if .InterfaceMethods}}
+{{if .RequestAndResponses}}
+    {{range .RequestAndResponses}}
+    type {{.Request.Name}} struct{
+        {{range .Request.Fields}}{{.Name}} {{.Type}}
+        {{end}}
+    }
+
+    type {{.Response.Name}} struct{
+        {{range .Response.Fields}}{{.Name}} {{.Type}}
+        {{end}}
+    }
+    {{end}}
+{{else if .InterfaceMethods}}
     {{range .InterfaceMethods}}
         type {{.}}Request struct{
 

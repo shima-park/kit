@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"ezrpro.com/micro/kit/pkg/generator"
 	"ezrpro.com/micro/kit/pkg/generator/service"
 	"ezrpro.com/micro/kit/pkg/utils"
 	"github.com/sirupsen/logrus"
@@ -30,40 +31,48 @@ var serviceCmd = &cobra.Command{
 			cmd.Help()
 			return
 		}
+		newService(serviceName, methods, nil)
+	},
+}
 
-		servicePath := utils.GetServiceFilePath(serviceName)
+func newService(serviceName string, methods []string, reqAndResps []generator.ReqAndResp) {
+	servicePath := utils.GetServiceFilePath(serviceName)
 
-		var options = []service.Option{
-			service.WithServiceName(serviceName),
-			service.WithMethods(methods),
-		}
-		for templateName, template := range service.TemplateMap {
-			filename := filepath.Join(servicePath, fmt.Sprintf("%s.go", templateName.String()))
-			file, err := createFile(filename)
-			if err != nil {
-				logrus.Error(err)
-				return
-			}
-			defer GoimportsAndformat(filename)
-			defer file.Close()
+	var options = []service.Option{
+		service.WithServiceName(serviceName),
+		service.WithMethods(methods),
+	}
 
-			options = append(options,
-				service.WithReadWriter(
-					templateName,
-					strings.NewReader(template),
-					file),
-			)
-		}
+	if len(reqAndResps) > 0 {
+		options = append(options, service.WithRequestAndResponses(reqAndResps))
+	}
 
-		gen := service.NewServiceGenerator(
-			options...,
-		)
-		err := gen.Generate()
+	for templateName, template := range service.TemplateMap {
+		filename := filepath.Join(servicePath, fmt.Sprintf("%s.go", templateName.String()))
+		file, err := createFile(filename)
 		if err != nil {
 			logrus.Error(err)
 			return
 		}
-	},
+		defer GoimportsAndformat(filename)
+		defer file.Close()
+
+		options = append(options,
+			service.WithReadWriter(
+				templateName,
+				strings.NewReader(template),
+				file),
+		)
+	}
+
+	gen := service.NewServiceGenerator(
+		options...,
+	)
+	err := gen.Generate()
+	if err != nil {
+		logrus.Error(err)
+		return
+	}
 }
 
 func init() {

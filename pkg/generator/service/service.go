@@ -16,12 +16,8 @@ type ServiceGenerator struct {
 func NewServiceGenerator(opts ...Option) gen.Generator {
 	options := newOptions(opts...)
 
-	if options.serviceName == "" {
-		options.serviceName = options.serviceSuffix
-	} else {
-		if !strings.HasSuffix(options.serviceName, options.serviceSuffix) {
-			options.serviceName = utils.ToCamelCase(options.serviceName + options.serviceSuffix)
-		}
+	if !strings.HasSuffix(options.serviceName, options.serviceSuffix) {
+		options.serviceName = utils.ToCamelCase(options.serviceName + options.serviceSuffix)
 	}
 
 	for i, method := range options.methods {
@@ -50,9 +46,10 @@ func (g *ServiceGenerator) Generate() error {
 		packageName := strings.ToLower(g.opts.serviceName)
 
 		var data = map[string]interface{}{
-			"PackageName":      packageName,
-			"ServiceName":      g.opts.serviceName,
-			"InterfaceMethods": g.opts.methods,
+			"PackageName":         packageName,
+			"ServiceName":         g.opts.serviceName,
+			"InterfaceMethods":    g.opts.methods,
+			"RequestAndResponses": g.opts.reqAndResps,
 		}
 
 		err = t.Execute(readWriter.writer, data)

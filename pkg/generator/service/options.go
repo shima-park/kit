@@ -4,6 +4,7 @@ import (
 	"io"
 	"strings"
 
+	"ezrpro.com/micro/kit/pkg/generator"
 	"ezrpro.com/micro/kit/pkg/utils"
 )
 
@@ -38,6 +39,7 @@ type Options struct {
 	serviceName   string
 	methods       []string
 	serviceSuffix string
+	reqAndResps   []generator.ReqAndResp
 }
 
 type Option func(*Options)
@@ -88,5 +90,11 @@ func WithReadWriter(t Template, tpl io.Reader, w io.Writer) Option {
 func WithServiceSuffix(serviceSuffix string) Option {
 	return func(o *Options) {
 		o.serviceSuffix = serviceSuffix
+	}
+}
+
+func WithRequestAndResponses(reqAndResps []generator.ReqAndResp) Option {
+	return func(o *Options) {
+		o.reqAndResps = reqAndResps
 	}
 }

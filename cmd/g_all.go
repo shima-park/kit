@@ -1,6 +1,14 @@
 package cmd
 
 import (
+	"fmt"
+	"path/filepath"
+	"strings"
+
+	"ezrpro.com/micro/kit/pkg/cst"
+	"ezrpro.com/micro/kit/pkg/generator"
+	"ezrpro.com/micro/kit/pkg/generator/service"
+	"ezrpro.com/micro/kit/pkg/utils"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -17,6 +25,46 @@ var allCmd = &cobra.Command{
 		if sourceFile == "" {
 			logrus.Error("You must provide a source file for analyze of ast")
 			return
+		}
+
+		if utils.IsProtobufSourceFile(sourceFile) {
+			cst, err := cst.New(sourceFile)
+			if err != nil {
+				logrus.Error("Your source file has an error", err)
+				return
+			}
+			var (
+				serviceName string
+				pbSvcSuffix = utils.GetProtobufServiceSuffix()
+				methods     []string
+				reqAndResps []generator.ReqAndResp
+			)
+			for _, iface := range cst.Interfaces() {
+				if strings.HasSuffix(iface.Name, pbSvcSuffix) {
+					serviceName = strings.ToLower(strings.TrimSuffix(iface.Name, pbSvcSuffix))
+					for _, method := range iface.Methods {
+						methods = append(methods, method.Name)
+					}
+					reqAndResps = generator.GetRequestAndResponseList(cst)
+					break
+				}
+			}
+
+			if serviceName == "" {
+				logrus.Error("Can't find out service name")
+				return
+			}
+
+			if len(methods) == 0 {
+				logrus.Error("The service method must be provided")
+				return
+			}
+
+			// 先通过pb.go生成service相关代码
+			newService(serviceName, methods, reqAndResps)
+			// 拼接service.go目录
+			sourcePath := utils.GetServiceFilePath(serviceName)
+			sourceFile = filepath.Join(sourcePath, fmt.Sprintf("%s.go", service.ServiceTemplate.String()))
 		}
 
 		var (

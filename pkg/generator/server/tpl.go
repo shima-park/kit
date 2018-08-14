@@ -221,7 +221,8 @@ func addHTTPServer(options Options, svc spiderconn.Service) error {
 	transport := {{$transportPackageName}}.NewHTTPHandler(transportOptions...)
 	if httpPattern != "" {
 		httpMux.Handle(httpPattern, transport)
-		return http.Serve(httpListener, httpMux)
+	} else {
+		httpMux.Handle("/", transport)
 	}
 
 	errCh := make(chan error, 1)
