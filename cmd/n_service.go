@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"ezrpro.com/micro/kit/pkg/generator"
+	"ezrpro.com/micro/kit/pkg/cst"
 	"ezrpro.com/micro/kit/pkg/generator/service"
 	"ezrpro.com/micro/kit/pkg/utils"
 	"github.com/sirupsen/logrus"
@@ -35,7 +35,7 @@ var serviceCmd = &cobra.Command{
 	},
 }
 
-func newService(serviceName string, methods []string, reqAndResps []generator.ReqAndResp) {
+func newService(serviceName string, methods []string, csTree cst.ConcreteSyntaxTree) {
 	servicePath := utils.GetServiceFilePath(serviceName)
 
 	var options = []service.Option{
@@ -43,8 +43,8 @@ func newService(serviceName string, methods []string, reqAndResps []generator.Re
 		service.WithMethods(methods),
 	}
 
-	if len(reqAndResps) > 0 {
-		options = append(options, service.WithRequestAndResponses(reqAndResps))
+	if csTree != nil {
+		options = append(options, service.WithConcreteSyntaxTree(csTree))
 	}
 
 	for templateName, template := range service.TemplateMap {

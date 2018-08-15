@@ -25,6 +25,7 @@ func SetDefaults() {
 	viper.SetDefault("gk_protobuf_service_suffix", "Server")
 	viper.SetDefault("gk_request_suffix", "Request")
 	viper.SetDefault("gk_response_suffix", "Response")
+	viper.SetDefault("gk_protobuf_path", "")
 }
 
 func GetFileNameWithoutExt(filename string) string {
@@ -93,8 +94,7 @@ func defaultGOPATH() string {
 }
 
 func GetImportPath() string {
-	gopath := filepath.Join(GetGOPATH(), "src")
-	return strings.Replace(GetPWD(), gopath, "", -1)
+	return strings.Replace(GetPWD(), GetGoSrc(), "", -1)
 }
 
 func GetPWD() string {
@@ -190,9 +190,20 @@ func GetServiceImportPath(svc string) string {
 }
 
 func GetProtobufImportPath(svc string) string {
+	if GetProtobufPath() != "" {
+		return GetProtobufPath()
+	}
 	return getProtobufPath(
 		strings.TrimLeft(GetImportPath(), string(filepath.Separator)),
 		svc)
+}
+
+func GetProtobufPath() string {
+	return viper.GetString("gk_protobuf_path")
+}
+
+func SetProtobufPath(path string) {
+	viper.Set("gk_protobuf_path", path)
 }
 
 func GetEndpointImportPath(svc string) string {
@@ -259,4 +270,16 @@ func GetImplFilePath(svc string) string {
 	return getImplPath(
 		GetPWD(),
 		svc)
+}
+
+// GetImportPathByFileAbsPath
+// 转换/Users/liuxingwang/go/src/ezrpro.com/micro/demo/pkg/addpb/addservice.pb.go
+// 成 ezrpro.com/micro/demo/pkg/addpb
+func GetImportPathByFileAbsPath(fileAbsPath string) string {
+	base := filepath.Base(fileAbsPath)
+	s := strings.Replace(fileAbsPath, GetGoSrc(), "", -1)
+	s = strings.Replace(s, base, "", -1)
+	s = strings.TrimLeft(s, string(filepath.Separator))
+	s = strings.TrimRight(s, string(filepath.Separator))
+	return s
 }

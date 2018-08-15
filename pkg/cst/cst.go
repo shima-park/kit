@@ -217,6 +217,7 @@ type Struct struct {
 	Name        string         // 结构体名称
 	Fields      []Field        // 结构体字段
 	Methods     []Method       // 结构体函数列表
+	Type        *Type
 }
 
 type Var struct {

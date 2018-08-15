@@ -4,7 +4,7 @@ import (
 	"io"
 	"strings"
 
-	"ezrpro.com/micro/kit/pkg/generator"
+	"ezrpro.com/micro/kit/pkg/cst"
 	"ezrpro.com/micro/kit/pkg/utils"
 )
 
@@ -39,7 +39,8 @@ type Options struct {
 	serviceName   string
 	methods       []string
 	serviceSuffix string
-	reqAndResps   []generator.ReqAndResp
+
+	csTree cst.ConcreteSyntaxTree
 }
 
 type Option func(*Options)
@@ -93,8 +94,8 @@ func WithServiceSuffix(serviceSuffix string) Option {
 	}
 }
 
-func WithRequestAndResponses(reqAndResps []generator.ReqAndResp) Option {
+func WithConcreteSyntaxTree(csTree cst.ConcreteSyntaxTree) Option {
 	return func(o *Options) {
-		o.reqAndResps = reqAndResps
+		o.csTree = csTree
 	}
 }

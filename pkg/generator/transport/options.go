@@ -35,6 +35,7 @@ type Options struct {
 	transportPackageName string
 	baseServiceName      string
 	serviceSuffix        string
+	pbGoPath             string
 }
 
 type Option func(*Options)
@@ -82,5 +83,11 @@ func WithTransportPackageName(transportPackageName string) Option {
 func WithServiceSuffix(serviceSuffix string) Option {
 	return func(o *Options) {
 		o.serviceSuffix = serviceSuffix
+	}
+}
+
+func WithPBGoPath(pbGoPath string) Option {
+	return func(o *Options) {
+		o.pbGoPath = pbGoPath
 	}
 }

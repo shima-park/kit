@@ -103,12 +103,8 @@ func (g *AssignmentGenerator) findStruct(packageName string, structName string) 
 }
 
 // 生成转换基本类型的方法体
-func (g *AssignmentGenerator) generateBasicTypeAssignmentConvertFunc(srcAlias Alias, src cst.BaseType, dst cst.BaseType) {
-	var (
-		srcType   = src
-		dstType   = dst
-		aliasName = srcAlias.String()
-	)
+func (g *AssignmentGenerator) generateBasicTypeAssignmentConvertFunc(srcAlias Alias, srcType cst.BaseType, dstType cst.BaseType) {
+	var aliasName = srcAlias.String()
 	if srcType.Name == dstType.Name {
 		if srcType.Star && !dstType.Star {
 			// F float64    req.F *float64
@@ -175,6 +171,18 @@ func (g *AssignmentGenerator) generateBasicTypeAssignmentConvertFunc(srcAlias Al
 
 // 生成结构体转换的方法体
 func (g *AssignmentGenerator) generateStructTypeAssignmentConvertFunc(srcAlias Alias, srcType, dstType cst.BaseType, srcStruct, dstStruct *cst.Struct) error {
+	// pb.go中定义枚举类型时，service中直接引用pb中的枚举类型
+	// 枚举在pb.go生成的文件中类似 type EnumXXX int
+	// 这里把它作为一个没有字段的结构体，直接赋值
+	// 这里有两个判断的原因是,encode,decode 一去一回src<=>dst
+	if ((srcType.X == "" && srcStruct != nil && srcStruct.PackageName == dstType.X) ||
+		(dstType.X == "" && dstStruct != nil && dstStruct.PackageName == srcType.X)) &&
+		srcType.Name == dstType.Name {
+		g.print(srcAlias.String())
+		return nil
+	}
+
+	// 非当前包去生成赋值语句时，需要补全引用的包名
 	dstType.X = dstStruct.PackageName
 	srcType.X = srcStruct.PackageName
 	g.println("func(src %s) (dst %s) {", srcType.String(), dstType.String())
@@ -187,37 +195,54 @@ func (g *AssignmentGenerator) generateStructTypeAssignmentConvertFunc(srcAlias A
 			srcType.Star,
 		)
 		// 判断是否需要生成别名.字段名时的nil pointer检查语句
-		statement, isNeed := newAlias.CheckNil()
-		if isNeed {
+		statement, isNeedWrap := newAlias.CheckNil()
+		if isNeedWrap {
 			g.println("if %s {", statement)
 		}
 
 		{
-			if dstType.Star {
-				removeStarType := dstType
-				removeStarType.Star = false
-				g.println("dst = &%s{", removeStarType.String())
+			if dstStruct.Type != nil && srcStruct.Type != nil {
+				// 枚举类型互相转换
+				srcStruct.Type.BaseType.Star = srcType.Star
+				if dstType.Star {
+					removeStarType := dstType
+					removeStarType.Star = false
+					g.print("temp := %s(", removeStarType.String())
+					g.generateBasicTypeAssignmentConvertFunc(newAlias, srcStruct.Type.BaseType, dstStruct.Type.BaseType)
+					g.println(")")
+					g.print("dst = &temp")
+				} else {
+					g.print("dst = %s(", dstType)
+					g.generateBasicTypeAssignmentConvertFunc(newAlias, srcStruct.Type.BaseType, dstStruct.Type.BaseType)
+					g.print(")")
+				}
 			} else {
-				g.println("dst = %s{", dstType.String())
-			}
-			for _, srcField := range srcStruct.Fields {
-				for _, dstField := range dstStruct.Fields {
-					if srcField.Name == dstField.Name {
-						err := g.generateAssignmentSegment(
-							newAlias,
-							srcField,
-							dstField,
-						)
-						if err != nil {
-							return err
+				if dstType.Star {
+					removeStarType := dstType
+					removeStarType.Star = false
+					g.println("dst = &%s{", removeStarType.String())
+				} else {
+					g.println("dst = %s{", dstType)
+				}
+				for _, srcField := range srcStruct.Fields {
+					for _, dstField := range dstStruct.Fields {
+						if srcField.Name == dstField.Name {
+							err := g.generateAssignmentSegment(
+								newAlias,
+								srcField,
+								dstField,
+							)
+							if err != nil {
+								return err
+							}
 						}
 					}
 				}
+				g.println("}")
 			}
-			g.println("}")
 		}
 
-		if isNeed {
+		if isNeedWrap {
 			g.println("}")
 		}
 	}

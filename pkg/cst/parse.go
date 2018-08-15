@@ -339,9 +339,16 @@ func (t *concreteSyntaxTree) parseTypeSpec(specs []ast.Spec) {
 					Position: t.fset.Position(typeSpec.Name.NamePos),
 					Name:     typeName,
 					Fields:   t.parseFields(tt.Fields, typeName),
-				})
+				}, false)
 			case *ast.FuncType:
-				t.parseFuncType(tt)
+				t.parseFuncType(typeName, tt)
+			case *ast.Ident:
+				typ := t.getFieldType(tt, typeName)
+				t.addStruct(t.packageName, &Struct{
+					Position: t.fset.Position(typeSpec.Name.NamePos),
+					Name:     typeName,
+					Type:     &typ,
+				}, true)
 			default:
 				panic(fmt.Sprintf("Unknown TypeSpec(%T) analysis", tt))
 			}
@@ -349,12 +356,18 @@ func (t *concreteSyntaxTree) parseTypeSpec(specs []ast.Spec) {
 	}
 }
 
-func (t *concreteSyntaxTree) addStruct(pkg string, strc *Struct) {
+func (t *concreteSyntaxTree) addStruct(pkg string, strc *Struct, isTypeDefine bool) {
 	if t.structMap[pkg] == nil {
 		t.structMap[pkg] = map[string]*Struct{}
 	}
 
-	if _, found := t.structMap[pkg][strc.Name]; found {
+	if existsStruct, found := t.structMap[pkg][strc.Name]; found {
+		// 如果是类型定义类型的语句，当前存储的structmap中的type为nil
+		// 覆盖更新
+		if existsStruct.Type == nil && strc.Type != nil && isTypeDefine {
+			strc.PackageName = pkg
+			t.structMap[pkg][strc.Name] = strc
+		}
 		return
 	}
 
@@ -384,8 +397,9 @@ func (t *concreteSyntaxTree) parseInterface(it *ast.InterfaceType, iterName stri
 	t.interfaces = append(t.interfaces, iter)
 }
 
-func (t *concreteSyntaxTree) parseFuncType(ft *ast.FuncType) {
+func (t *concreteSyntaxTree) parseFuncType(name string, ft *ast.FuncType) {
 	t.methods = append(t.methods, Method{
+		Name:    name,
 		Params:  t.parseFields(ft.Params, ""),
 		Results: t.parseFields(ft.Results, ""),
 	})
@@ -561,7 +575,7 @@ func (t *concreteSyntaxTree) parseStruct(id *ast.Ident, X string) {
 		return
 	}
 
-	t.addStruct(pkg, s)
+	t.addStruct(pkg, s, false)
 }
 
 func (t *concreteSyntaxTree) parseReferencePackage(pkg string) {

@@ -31,7 +31,8 @@ var transportCmd = &cobra.Command{
 			return
 		}
 
-		err := generateTransport(sourceFile)
+		tg := &TransportGenerator{}
+		err := tg.generateTransport(sourceFile)
 		if err != nil {
 			logrus.Error(err)
 			return
@@ -39,13 +40,17 @@ var transportCmd = &cobra.Command{
 	},
 }
 
-func generateTransport(sourceFile string) error {
-	cst, err := cst.New(sourceFile)
+type TransportGenerator struct {
+	pbGoFilePath string
+}
+
+func (tg *TransportGenerator) generateTransport(sourceFile string) error {
+	csTree, err := cst.New(sourceFile)
 	if err != nil {
 		return err
 	}
 	serviceSuffix := utils.SelectServiceSuffix(sourceFile)
-	baseServiceName := service.GetBaseServiceName(cst.PackageName(), serviceSuffix)
+	baseServiceName := service.GetBaseServiceName(csTree.PackageName(), serviceSuffix)
 	transportPath := utils.GetTransportFilePath(baseServiceName)
 	transportPackageName := filepath.Base(transportPath)
 	var options = []transport.Option{
@@ -72,7 +77,7 @@ func generateTransport(sourceFile string) error {
 	}
 
 	gen := transport.NewTransportGenerator(
-		cst,
+		csTree,
 		options...,
 	)
 

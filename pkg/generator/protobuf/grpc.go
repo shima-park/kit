@@ -53,7 +53,11 @@ func (g *ProtobufGenerator) Generate() error {
 			continue
 		}
 
-		g.generateMessage(strc)
+		if strc.Type == nil {
+			g.generateMessage(strc)
+		} else {
+			g.generateEnum(strc)
+		}
 	}
 
 	return nil
@@ -202,6 +206,20 @@ func (g *ProtobufGenerator) generateMessage(strc *cst.Struct) {
 		w.P(`%s %s = %d;`, grpcType, fieldName, seq)
 		w.P(``)
 	}
+	w.P(`}`)
+	w.P(``)
+}
+
+func (g *ProtobufGenerator) generateEnum(strc *cst.Struct) {
+	w := NewSugerWriter(g.opts.writer)
+	w.P(`enum %s {`, strc.Name)
+	for i, c := range g.cst.Consts() {
+		if c.Type.Name == strc.Name {
+			w.P(``)
+			w.P(`%s = %d;`, c.Name, i)
+		}
+	}
+	w.P(``)
 	w.P(`}`)
 	w.P(``)
 }

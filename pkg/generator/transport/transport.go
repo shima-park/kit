@@ -32,7 +32,11 @@ func (g *TransportGenerator) Generate() error {
 			return err
 		}
 
-		pbCST, err := getProtobufCST(g.opts.baseServiceName, g.cst.PackageName())
+		pbCST, err := getProtobufCST(
+			g.opts.pbGoPath,
+			g.opts.baseServiceName,
+			g.cst.PackageName(),
+		)
 		if err != nil {
 			return err
 		}
@@ -83,11 +87,13 @@ func (g *TransportGenerator) Generate() error {
 	return nil
 }
 
-func getProtobufCST(baseServiceName, servicePackageName string) (cst.ConcreteSyntaxTree, error) {
-	pbGoPath := utils.GetProtobufFilePath(baseServiceName)
+func getProtobufCST(pbGoFilePath, baseServiceName, servicePackageName string) (cst.ConcreteSyntaxTree, error) {
+	if pbGoFilePath == "" {
+		pbGoPath := utils.GetProtobufFilePath(baseServiceName)
+		pbGoFilePath = filepath.Join(pbGoPath, servicePackageName+".pb.go")
+	}
 
-	pbGoFile := filepath.Join(pbGoPath, servicePackageName+".pb.go")
-	pbCST, err := cst.New(pbGoFile)
+	pbCST, err := cst.New(pbGoFilePath)
 	if err != nil {
 		return nil, err
 	}

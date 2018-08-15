@@ -41,6 +41,28 @@ func New(opts ...Option) {{.ServiceName}} {
         {{end}}
     }
     {{end}}
+
+    {{$constMap := .ConstMap}}
+    {{if .ReferenceStructMap}}
+        {{range .ReferenceStructMap}}
+            {{if .Type}}
+                type {{.Name}} {{.Type}}
+                {{$structName := .Name}}
+                const(
+                {{range $constMap}}
+                    {{if eq .Type.Name $structName}}
+                        {{.Name}} {{.Type}} = {{.Value}}
+                    {{end}}
+                {{end}}
+                )
+            {{else}}
+                type {{.Name}} struct{
+                    {{range .Fields}}{{.Name}} {{.Type}}
+                    {{end}}
+                }
+            {{end}}
+        {{end}}
+    {{end}}
 {{else if .InterfaceMethods}}
     {{range .InterfaceMethods}}
         type {{.}}Request struct{
