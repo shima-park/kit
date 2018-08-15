@@ -216,7 +216,10 @@ func (g *ProtobufGenerator) generateEnum(strc *cst.Struct) {
 	for i, c := range g.cst.Consts() {
 		if c.Type.Name == strc.Name {
 			w.P(``)
-			w.P(`%s = %d;`, c.Name, i)
+			// 这里其实比较蛋疼，从grpc生成会带上PhoneType_枚举的名字前缀
+			// 如果已经带了这个前缀,这里将它去掉
+			name := strings.TrimPrefix(c.Name, strc.Name+"_")
+			w.P(`%s = %d;`, name, i)
 		}
 	}
 	w.P(``)
