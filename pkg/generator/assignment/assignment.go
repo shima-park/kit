@@ -8,6 +8,7 @@ import (
 
 	"ezrpro.com/micro/kit/pkg/cst"
 	gen "ezrpro.com/micro/kit/pkg/generator"
+	"ezrpro.com/micro/kit/pkg/utils"
 )
 
 type GeneratorFactory struct {
@@ -93,11 +94,14 @@ func (g *AssignmentGenerator) Generate() error {
 }
 
 func (g *AssignmentGenerator) findStruct(packageName string, structName string) *cst.Struct {
-	switch packageName {
-	case g.cst.PackageName():
-		return g.cst.StructMap()[packageName][structName]
-	case g.pbcst.PackageName():
-		return g.pbcst.StructMap()[packageName][structName]
+	// structmap中会包含其他引用包中的strut
+	// 不能简单粗暴根据packageName进行switch
+	if s, found := g.cst.StructMap()[packageName][structName]; found {
+		return s
+	}
+
+	if s, found := g.pbcst.StructMap()[packageName][structName]; found {
+		return s
 	}
 	return nil
 }
@@ -171,17 +175,6 @@ func (g *AssignmentGenerator) generateBasicTypeAssignmentConvertFunc(srcAlias Al
 
 // 生成结构体转换的方法体
 func (g *AssignmentGenerator) generateStructTypeAssignmentConvertFunc(srcAlias Alias, srcType, dstType cst.BaseType, srcStruct, dstStruct *cst.Struct) error {
-	// pb.go中定义枚举类型时，service中直接引用pb中的枚举类型
-	// 枚举在pb.go生成的文件中类似 type EnumXXX int
-	// 这里把它作为一个没有字段的结构体，直接赋值
-	// 这里有两个判断的原因是,encode,decode 一去一回src<=>dst
-	if ((srcType.X == "" && srcStruct != nil && srcStruct.PackageName == dstType.X) ||
-		(dstType.X == "" && dstStruct != nil && dstStruct.PackageName == srcType.X)) &&
-		srcType.Name == dstType.Name {
-		g.print(srcAlias.String())
-		return nil
-	}
-
 	// 非当前包去生成赋值语句时，需要补全引用的包名
 	dstType.X = dstStruct.PackageName
 	srcType.X = srcStruct.PackageName
@@ -250,6 +243,27 @@ func (g *AssignmentGenerator) generateStructTypeAssignmentConvertFunc(srcAlias A
 	return nil
 }
 
+// TODO 如果有同样包名的就会有问题
+// 0 model {./pkg/addservice/service.go:47:2 C model.Misc2 }, 数据类型X标明了引用包名
+// 1 model {/Users/liuxingwang/go/src/ezrpro.com/micro/demo/model/misc.go:9:2 C Foo }, 没有表明引用包名，尝试从文件定义处获取包名
+// 2 直接使用当前语法树的packageName
+func inferPackageName(t cst.BaseType, def string) string {
+	return ifEmpty(
+		t.X,
+		utils.GetPackageNameByFileAbsPath(t.Position.String()),
+		def,
+	)
+}
+
+func ifEmpty(ss ...string) string {
+	for _, s := range ss {
+		if s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
 func (g *AssignmentGenerator) generateAssignmentSegment(srcAlias Alias, src cst.Field, dst cst.Field) error {
 	switch dst.Type.GoType {
 	case cst.BasicType:
@@ -260,8 +274,8 @@ func (g *AssignmentGenerator) generateAssignmentSegment(srcAlias Alias, src cst.
 		srcType := src.Type.BaseType
 		dstType := dst.Type.BaseType
 		// 寻找类型的数据结构
-		srcStruct := g.findStruct(g.src.PackageName, srcType.Name)
-		dstStruct := g.findStruct(g.dst.PackageName, dstType.Name)
+		srcStruct := g.findStruct(inferPackageName(srcType, g.src.PackageName), srcType.Name)
+		dstStruct := g.findStruct(inferPackageName(dstType, g.dst.PackageName), dstType.Name)
 		g.print("%s: ", dst.Name)
 		err := g.generateStructTypeAssignmentConvertFunc(srcAlias.With(src.Name), srcType, dstType, srcStruct, dstStruct)
 		if err != nil {
@@ -301,8 +315,8 @@ func (g *AssignmentGenerator) generateAssignmentSegment(srcAlias Alias, src cst.
 			g.println("}(%s),", srcAlias)
 		case cst.StructType:
 			// 数组的值是对象类型，生成转换方法
-			srcStruct := g.findStruct(g.src.PackageName, src.Type.ElementType.Name)
-			dstStruct := g.findStruct(g.dst.PackageName, dst.Type.ElementType.Name)
+			srcStruct := g.findStruct(inferPackageName(*src.Type.ElementType, g.src.PackageName), src.Type.ElementType.Name)
+			dstStruct := g.findStruct(inferPackageName(*dst.Type.ElementType, g.dst.PackageName), dst.Type.ElementType.Name)
 
 			src.Type.ElementType.X = srcStruct.PackageName
 			dst.Type.ElementType.X = dstStruct.PackageName
@@ -373,8 +387,8 @@ func (g *AssignmentGenerator) generateAssignmentSegment(srcAlias Alias, src cst.
 			g.println("}(%s),", srcAlias)
 		case cst.StructType:
 			// map的值是对象类型，生成转换方法
-			srcStruct := g.findStruct(g.src.PackageName, src.Type.ValueType.Name)
-			dstStruct := g.findStruct(g.dst.PackageName, dst.Type.ValueType.Name)
+			srcStruct := g.findStruct(inferPackageName(*src.Type.ValueType, g.src.PackageName), src.Type.ValueType.Name)
+			dstStruct := g.findStruct(inferPackageName(*dst.Type.ValueType, g.dst.PackageName), dst.Type.ValueType.Name)
 
 			src.Type.ValueType.X = srcStruct.PackageName
 			dst.Type.ValueType.X = dstStruct.PackageName

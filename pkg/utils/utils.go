@@ -93,7 +93,7 @@ func defaultGOPATH() string {
 	return ""
 }
 
-func GetImportPath() string {
+func GetPWDImportPath() string {
 	return strings.Replace(GetPWD(), GetGoSrc(), "", -1)
 }
 
@@ -185,7 +185,7 @@ func GetResponseSuffix() string {
 
 func GetServiceImportPath(svc string) string {
 	return getServicePath(
-		strings.TrimLeft(GetImportPath(), string(filepath.Separator)),
+		strings.TrimLeft(GetPWDImportPath(), string(filepath.Separator)),
 		svc)
 }
 
@@ -194,7 +194,7 @@ func GetProtobufImportPath(svc string) string {
 		return GetProtobufPath()
 	}
 	return getProtobufPath(
-		strings.TrimLeft(GetImportPath(), string(filepath.Separator)),
+		strings.TrimLeft(GetPWDImportPath(), string(filepath.Separator)),
 		svc)
 }
 
@@ -208,25 +208,25 @@ func SetProtobufPath(path string) {
 
 func GetEndpointImportPath(svc string) string {
 	return getEndpointPath(
-		strings.TrimLeft(GetImportPath(), string(filepath.Separator)),
+		strings.TrimLeft(GetPWDImportPath(), string(filepath.Separator)),
 		svc)
 }
 
 func GetTransportImportPath(svc string) string {
 	return getTransportPath(
-		strings.TrimLeft(GetImportPath(), string(filepath.Separator)),
+		strings.TrimLeft(GetPWDImportPath(), string(filepath.Separator)),
 		svc)
 }
 
 func GetServerImportPath(svc string) string {
 	return getServerPath(
-		strings.TrimLeft(GetImportPath(), string(filepath.Separator)),
+		strings.TrimLeft(GetPWDImportPath(), string(filepath.Separator)),
 		svc)
 }
 
 func GetClientImportPath(svc string) string {
 	return getClientPath(
-		strings.TrimLeft(GetImportPath(), string(filepath.Separator)),
+		strings.TrimLeft(GetPWDImportPath(), string(filepath.Separator)),
 		svc)
 }
 
@@ -282,4 +282,13 @@ func GetImportPathByFileAbsPath(fileAbsPath string) string {
 	s = strings.TrimLeft(s, string(filepath.Separator))
 	s = strings.TrimRight(s, string(filepath.Separator))
 	return s
+}
+
+// path := "/Users/liuxingwang/go/src/ezrpro.com/micro/demo/model/misc.go:9:2"
+// path = GetPackageNameByFileAbsPath(path)
+// path = model
+func GetPackageNameByFileAbsPath(path string) string {
+	path = filepath.Dir(path)
+	path = strings.TrimPrefix(path, GetGoSrc())
+	return filepath.Base(path)
 }

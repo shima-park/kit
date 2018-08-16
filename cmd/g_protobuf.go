@@ -18,7 +18,7 @@ var grpcCmd = &cobra.Command{
 	Short:   "generate protobuf of go-kit grpc",
 	Aliases: []string{"p"},
 	Run: func(cmd *cobra.Command, args []string) {
-		sourceFile := viper.GetString("g_s_source_file")
+		sourceFile := viper.GetString("g_p_source_file")
 		if sourceFile == "" {
 			logrus.Error("You must provide a source file for analyze of ast")
 			return
@@ -85,5 +85,5 @@ func init() {
 	generateCmd.AddCommand(grpcCmd)
 
 	grpcCmd.Flags().StringP("source", "s", "", "Source file defined by the service interface")
-	viper.BindPFlag("g_s_source_file", grpcCmd.Flags().Lookup("source"))
+	viper.BindPFlag("g_p_source_file", grpcCmd.Flags().Lookup("source"))
 }

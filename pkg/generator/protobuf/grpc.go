@@ -289,7 +289,7 @@ func (g *ProtobufGenerator) checkPBTag(strc *cst.Struct) {
 
 	// 使用了pb这个tag但是并没有给所有的字段加上，这种情况没办法增加序列号或者检查命名冲突
 	if useTagCount > 0 && useTagCount != len(strc.Fields) {
-		panic(fmt.Sprintf("If you use the \"pb\" tag you must set for(StructName:%s) all fields\n %s", strc.Name, strc.Position.String()))
+		panic(fmt.Sprintf("If you use the \"pb\" tag you must set for(StructName:%s) all fields\n %s", strc.Name, strc.Position))
 	}
 }
 

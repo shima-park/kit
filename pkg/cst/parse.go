@@ -15,6 +15,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"ezrpro.com/micro/kit/pkg/utils"
 )
 
 type concreteSyntaxTree struct {
@@ -37,7 +39,9 @@ type concreteSyntaxTree struct {
 
 	methods []Method
 
-	parsedReferencePackageMap map[string]struct{} // key: package val: struct{}
+	// key: import path e.g. github.com/xxx/xxx
+	// val: struct{}
+	parsedReferencePackageMap map[string]struct{}
 }
 
 func NewConcreteSyntaxTree(fset *token.FileSet, file *ast.File, opts ...Option) ConcreteSyntaxTree {
@@ -182,6 +186,7 @@ func (t *concreteSyntaxTree) parseConst(specs []ast.Spec) {
 					if vsp.Type == nil {
 						// TODO
 						// var定义时没有设置类型的，简陋推断
+						// e.g. var i = 1
 						v.Type = getTypeByValue(vt.Value)
 					}
 				case *ast.UnaryExpr:
@@ -192,7 +197,7 @@ func (t *concreteSyntaxTree) parseConst(specs []ast.Spec) {
 
 					//TODO
 					// case *ast.BinaryExpr:
-					// 1<<31 - 1 这种表达式类型
+					// e.g. 1<<31 - 1 这种表达式类型
 				}
 				if v.Value == nil {
 					fst := token.NewFileSet()
@@ -226,7 +231,7 @@ func (t *concreteSyntaxTree) parseVars(specs []ast.Spec) {
 				v.Type = t.getFieldType(vsp.Type, "")
 			}
 
-			if len(vsp.Values) > 0 {
+			if len(vsp.Values) > 0 && i < len(vsp.Values) {
 				switch vt := vsp.Values[i].(type) {
 				case *ast.BasicLit:
 					v.Value = vt.Value
@@ -349,8 +354,18 @@ func (t *concreteSyntaxTree) parseTypeSpec(specs []ast.Spec) {
 					Name:     typeName,
 					Type:     &typ,
 				}, true)
+			case *ast.SelectorExpr:
+				// TODO type Key syscall.Handle
+			case *ast.ArrayType:
+				// TODO type SpecialCase []CaseRange
+			case *ast.StarExpr:
+				// TODO type Pointer *ArbitraryType
+			case *ast.MapType:
+				// TODO type Values map[string][]string
+			case *ast.ChanType:
+				// TODO type chanWriter chan string
 			default:
-				panic(fmt.Sprintf("Unknown TypeSpec(%T) analysis", tt))
+				panic(fmt.Sprintf("Unknown TypeSpec(type:%T pos:%s) analysis", tt, t.fset.Position(tt.Pos())))
 			}
 		}
 	}
@@ -518,6 +533,9 @@ func (t *concreteSyntaxTree) getFieldType(expr ast.Expr, structName string) Type
 	case *ast.FuncType:
 		// type XXXFunc func(i int)
 		typ.GoType = FuncType
+	case *ast.ChanType:
+		// var c chan int
+		// TODO
 	default:
 		panic(fmt.Sprintf("Unknown Expr(type:%T pos:%s) analysis", ex, t.fset.Position(ex.Pos())))
 	}
@@ -532,8 +550,9 @@ func (t *concreteSyntaxTree) getFieldTypeByIdent(ident *ast.Ident, pkg, structNa
 	} else {
 		typ.GoType = StructType
 		// 防止解析嵌套自身的结构体死循环
+		// e.g. type Foo struct{F Foo} 自己嵌套了自己
 		if structName != typ.Name {
-			t.parseStruct(ident, pkg)
+			t.parseStruct(ident, pkg, structName)
 		}
 	}
 	return typ
@@ -546,12 +565,19 @@ func IsBasicType(typeName string) bool {
 	return false
 }
 
-func (t *concreteSyntaxTree) parseStruct(id *ast.Ident, X string) {
-	pkg := X
-	if pkg == "" {
-		pkg = t.packageName
+func (t *concreteSyntaxTree) parseStruct(id *ast.Ident, X, structName string) {
+	// X 是字段的引用名 e.g. model.User这里的model
+	if X != "" && X != t.packageName {
+		// 如果入口处的structName是 XXXRequest或者XXXResponse之类后缀的结构体
+		// 尝试解析嵌套的其他包中的struct,例如model.Foo,取model文件夹中搜索
+		if strings.HasSuffix(structName, utils.GetRequestSuffix()) ||
+			strings.HasSuffix(structName, utils.GetResponseSuffix()) {
+			t.parseReferencePackage(X)
+		}
+		return
 	}
 
+	pkg := t.packageName
 	s := &Struct{
 		Name:        id.Name,
 		Position:    t.fset.Position(id.NamePos),
@@ -565,10 +591,6 @@ func (t *concreteSyntaxTree) parseStruct(id *ast.Ident, X string) {
 				s.Fields = t.parseFields(structType.Fields, id.Name)
 			}
 		}
-	} else {
-		// TODO time, context这些类型过滤
-		// 尝试解析引入包中的struct,例如model.Foo,取model文件夹中搜索
-		t.parseReferencePackage(pkg)
 	}
 
 	if _, found := t.structMap[t.packageName][s.Name]; found {
@@ -583,12 +605,6 @@ func (t *concreteSyntaxTree) parseReferencePackage(pkg string) {
 		return
 	}
 
-	if _, found := t.parsedReferencePackageMap[pkg]; !found {
-		t.parsedReferencePackageMap[pkg] = struct{}{}
-	} else {
-		return
-	}
-
 	for _, imp := range t.imports {
 		impPkg := imp.Alias
 		// 没有取别名的情况下这里是空字符串
@@ -596,43 +612,47 @@ func (t *concreteSyntaxTree) parseReferencePackage(pkg string) {
 			impPkg = strings.Trim(path.Base(imp.Path), "\"")
 		}
 
-		// TODO 引用包解析过滤，否则会发生死循环
-		if !strings.Contains(imp.Path, "ezrpro.com") {
+		// 引用包解析过滤，否则会发生堆栈溢出
+		if impPkg != pkg {
 			continue
 		}
 
-		if impPkg == pkg {
-			if _, found := t.structMap[pkg]; found {
-				break
-			}
+		if _, found := t.parsedReferencePackageMap[imp.Path]; !found {
+			t.parsedReferencePackageMap[imp.Path] = struct{}{}
+		} else {
+			return
+		}
 
-			for _, path := range []string{"GOPATH", "GOROOT"} {
-				gopath := os.Getenv(path)
-				filePath := filepath.Join(gopath, "src", strings.Trim(imp.Path, "\""))
-				fileinfos, err := ioutil.ReadDir(filePath)
-				if err != nil {
-					// TODO 文件无法找到是否需要处理
+		if _, found := t.structMap[pkg]; found {
+			return
+		}
+
+		for _, path := range []string{"GOPATH", "GOROOT"} {
+			gopath := os.Getenv(path)
+			filePath := filepath.Join(gopath, "src", strings.Trim(imp.Path, "\""))
+			fileinfos, err := ioutil.ReadDir(filePath)
+			if err != nil {
+				// TODO 文件无法找到是否需要处理
+				continue
+			}
+			for _, fileinfo := range fileinfos {
+				if fileinfo.IsDir() || !strings.HasSuffix(fileinfo.Name(), ".go") {
 					continue
 				}
-				for _, fileinfo := range fileinfos {
-					if fileinfo.IsDir() || !strings.HasSuffix(fileinfo.Name(), ".go") {
-						continue
-					}
-					fset := token.NewFileSet()
-					f, err := parser.ParseFile(fset, filepath.Join(filePath, fileinfo.Name()), nil, 0)
-					if err != nil {
-						panic(err)
-					}
-
-					t2 := newConcreteSyntaxTree(fset, f)
-					err = t2.Parse()
-					if err != nil {
-						panic(err)
-					}
-					t.mergeStructMap(t2)
+				fset := token.NewFileSet()
+				f, err := parser.ParseFile(fset, filepath.Join(filePath, fileinfo.Name()), nil, 0)
+				if err != nil {
+					panic(err)
 				}
+
+				t2 := newConcreteSyntaxTree(fset, f)
+				t2.parsedReferencePackageMap = t.parsedReferencePackageMap
+				err = t2.Parse()
+				if err != nil {
+					panic(err)
+				}
+				t.mergeStructMap(t2)
 			}
-			break
 		}
 	}
 }
@@ -643,12 +663,11 @@ func (t *concreteSyntaxTree) mergeStructMap(t2 *concreteSyntaxTree) *concreteSyn
 	if t.structMap[t2.packageName] == nil {
 		t.structMap[t2.packageName] = t2.structMap[t2.packageName]
 	}
-
 	// 合并解析过的包集合
-	//for key, val := range t2.parsedReferencePackageMap {
-	//	if _, found := t.parsedReferencePackageMap[key]; !found {
-	//		t.parsedReferencePackageMap[key] = val
-	//	}
-	//}
+	for key, val := range t2.parsedReferencePackageMap {
+		if _, found := t.parsedReferencePackageMap[key]; !found {
+			t.parsedReferencePackageMap[key] = val
+		}
+	}
 	return t
 }
